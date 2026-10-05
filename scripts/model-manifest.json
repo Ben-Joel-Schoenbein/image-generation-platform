@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "project_commit": "0375cd890b9fa72ca72cc267c4708f23b478fc09",
+  "files": [
+    {
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "revision": "cb504a4090723e43f17ad01cec0359490e2de613",
+      "file": "diffusion_models/qwen_image_2.1_bf16.safetensors",
+      "destination": "models/diffusion_models/qwen_image_2.1_bf16.safetensors",
+      "size": 14230280616,
+      "sha256": "89f4158d066cc33906a199fca85634f766892dd78f49b6698dabf187ac86c4bc"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "revision": "cb504a4090723e43f17ad01cec0359490e2de613",
+      "file": "text_encoders/qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors",
+      "destination": "models/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors",
+      "size": 9471072252,
+      "sha256": "32707d01b427e488af252b95c551989aad59f9fec611a694f5db6bde7f0f1f6c"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "revision": "cb504a4090723e43f17ad01cec0359490e2de613",
+      "file": "text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+      "destination": "models/text_encoders/qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors",
+      "size": 9471072252,
+      "sha256": "9182abae56fe05459840a86d22abd21f972061c92fce032630af680c8c5178d3"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "revision": "cb504a4090723e43f17ad01cec0359490e2de613",
+      "file": "text_encoders/qwen3vl_8b_bf16.safetensors",
+      "destination": "models/text_encoders/qwen3vl_8b_bf16.safetensors",
+      "size": 17534334616,
+      "sha256": "68bdc82bc1b66851162ae656225e7e2068166b603db19bd5d5a3b90eb12669a9"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-2.1",
+      "revision": "cb504a4090723e43f17ad01cec0359490e2de613",
+      "file": "vae/qwen_image_2.1_vae_bf16.safetensors",
+      "destination": "models/vae/qwen_image_2.1_vae_bf16.safetensors",
+      "size": 675509688,
+      "sha256": "bb21f7473051e1ac368515dd3f2e15cd44d7a11748ee8823e1ddca3e4876b7c9"
+    },
+    {
+      "repo": "Phr00t/Qwen-Image-Edit-Rapid-AIO",
+      "revision": "691024f438640508f8aa86414863fc15edfb8a84",
+      "file": "v19/Qwen-Rapid-AIO-NSFW-v19.safetensors",
+      "destination": "models/checkpoints/Qwen-Rapid-AIO-NSFW-v19.safetensors",
+      "size": 28431843583,
+      "sha256": "ba71575515709c9912560d1176b2386eaa49294fedc6ce57b9734aa57e91e5ac"
+    },
+    {
+      "repo": "pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF",
+      "revision": "143825976126abcfa68722d3e48819c5647f9cd8",
+      "file": "LICENSE",
+      "destination": "models/prompt_enhancers/t2i/LICENSE",
+      "size": 7831,
+      "git_blob": "13ae08d5a5828f508cf0e852b1b316c0c0bbb9b3"
+    },
+    {
+      "repo": "pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF",
+      "revision": "143825976126abcfa68722d3e48819c5647f9cd8",
+      "file": "pe_t2i_heretic-Q4_K_M.gguf",
+      "destination": "models/prompt_enhancers/t2i/pe_t2i_heretic-Q4_K_M.gguf",
+      "size": 5891334688,
+      "sha256": "9b54cb855d6565e6f330bd6fd35879b6d79e250121c7ea263be88256edd6d262"
+    },
+    {
+      "repo": "pottokao/Qwen-Image-2.1-PE-T2I-Heretic-GGUF",
+      "revision": "143825976126abcfa68722d3e48819c5647f9cd8",
+      "file": "system_prompt.txt",
+      "destination": "models/prompt_enhancers/t2i/system_prompt.txt",
+      "size": 10045,
+      "git_blob": "7fceb851703c22e341b24d562b4575180eec5297"
+    },
+    {
+      "repo": "pottokao/Qwen-Image-2.1-PE-I2I-Heretic-GGUF",
+      "revision": "564f783ebea6c244c7dae8460ece65eb174479a6",
+      "file": "LICENSE",
+      "destination": "models/prompt_enhancers/i2i/LICENSE",
+      "size": 7831,
+      "git_blob": "13ae08d5a5828f508cf0e852b1b316c0c0bbb9b3"
+    },
+    {
+      "repo": "pottokao/Qwen-Image-2.1-PE-I2I-Heretic-GGUF",
+      "revision": "564f783ebea6c244c7dae8460ece65eb174479a6",
+      "file": "pe_i2i_heretic-Q4_K_M.gguf",
+      "destination": "models/prompt_enhancers/i2i/pe_i2i_heretic-Q4_K_M.gguf",
+      "size": 5891334720,
+      "sha256": "4fa7d846acc6b6366f2b959293fb073f304d18c2d0a73d7a193cb09cc87bf074"
+    },
+    {
+      "repo": "pottokao/Qwen-Image-2.1-PE-I2I-Heretic-GGUF",
+      "revision": "564f783ebea6c244c7dae8460ece65eb174479a6",
+      "file": "pe_i2i_heretic.mmproj-bf16.gguf",
+      "destination": "models/prompt_enhancers/i2i/pe_i2i_heretic.mmproj-bf16.gguf",
+      "size": 921704608,
+      "sha256": "171a59a76e498252fb0ee5c145633c6f3a2eaaad03a171e3d5828de230369807"
+    },
+    {
+      "repo": "pottokao/Qwen-Image-2.1-PE-I2I-Heretic-GGUF",
+      "revision": "564f783ebea6c244c7dae8460ece65eb174479a6",
+      "file": "system_prompt.txt",
+      "destination": "models/prompt_enhancers/i2i/system_prompt.txt",
+      "size": 18344,
+      "git_blob": "424fcfbe2968973c57fe67e3d629df1b0a1e1550"
+    }
+  ]
+}
