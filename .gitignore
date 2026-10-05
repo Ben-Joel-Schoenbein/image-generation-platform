@@ -26,3 +26,7 @@ __pycache__/
 /models/prompt_enhancers/
 /web/heretic_prompts/
 /image-delete-backups/
+/.env
+/.env.setup-backup-*
+/setup-credentials.txt
+/models/
