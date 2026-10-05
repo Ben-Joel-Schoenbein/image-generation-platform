@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from PIL import Image
 from qwen_quality import configure_workflow, prepare_prompt, validate_options
+# QWEN_RAPID_AIO_V19_INTEGRATION_V1
+from rapid_aio import RAPID_MODEL, build_rapid_workflow, output_dimensions, rapid_controls, validate_generation_model
 from generation_progress import JOBS, ProgressMonitor, comfy_get, progress_markup, install_progress_routes
 from fastapi.responses import JSONResponse
 # QWEN_21_QUALITY_UPGRADE_V1
@@ -198,6 +200,19 @@ def validate_reference_set(mode: str, references: list[ReferenceImage]):
         raise ReferenceError(f"Reference images together must be at most {MAX_REFERENCE_TOTAL_MB} MB", 413)
 
 
+def validate_selected_model(model, mode, references, rapid_steps, quality="standard"):
+    try:
+        validate_generation_model(model, mode, len(references), rapid_steps)
+        if model == RAPID_MODEL:
+            source_size = None
+            if references:
+                with Image.open(io.BytesIO(references[0].raw)) as first_image:
+                    source_size = first_image.size
+            output_dimensions(quality, source_size)
+    except ValueError as exc:
+        raise ReferenceError(str(exc)) from exc
+
+
 def build_workflow(template: dict, uploads: list[dict], prompt: str) -> dict:
     replacements = {"{{PROMPT}}": prompt, "{{SEED}}": str(secrets.randbelow(2**32))}
     image_keys = ["{{IMAGE}}"] + ["{{IMAGE" + str(i) + "}}" for i in range(2, MAX_REFERENCES + 1)]
@@ -284,16 +299,17 @@ def comfy_error(response: httpx.Response) -> str:
 
 
 async def render_image(mode: str, prompt: str, references: list[ReferenceImage] | None = None, *,
-                       quality: str = "standard", edit_intent: str = "edit", enhance_prompt: bool = True, seed: int | None = None, progress=None) -> bytes:
+                       quality: str = "standard", edit_intent: str = "edit", enhance_prompt: bool = True, seed: int | None = None, progress=None, model: str = "qwen21", rapid_steps: int = 4) -> bytes:
     references = references or []
     try:
         validate_options(quality, edit_intent, seed)
+        validate_generation_model(model, mode, len(references), rapid_steps)
     except ValueError as exc:
         raise ReferenceError(str(exc)) from exc
     prompt = prepare_prompt(mode, prompt, edit_intent)
     validate_reference_set(mode, references)
     workflow_path = WORKFLOW_TEXT if mode == "text" else WORKFLOW_EDIT
-    if not workflow_path.is_file():
+    if (model == "qwen21" or enhance_prompt) and not workflow_path.is_file():
         raise FileNotFoundError("Admin has not installed this workflow")
     if progress:
         progress.update("waiting", "Waiting for the image worker")
@@ -306,8 +322,17 @@ async def render_image(mode: str, prompt: str, references: list[ReferenceImage] 
                 uploaded = await client.post(f"{COMFY_URL}/upload/image", files={"image": (reference.filename, reference.raw, reference.content_type)})
                 uploaded.raise_for_status()
                 uploads.append(uploaded.json())
-            workflow = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt)
-            workflow = configure_workflow(workflow, prompt, quality, enhance_prompt, seed)
+            if model == RAPID_MODEL:
+                source_size = None
+                if references:
+                    with Image.open(io.BytesIO(references[0].raw)) as first_image:
+                        source_size = first_image.size
+                enhancer_template = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt) if enhance_prompt else None
+                workflow = build_rapid_workflow(mode, uploads, prompt, quality, seed, rapid_steps,
+                                                source_size, enhancer_template)
+            else:
+                workflow = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt)
+                workflow = configure_workflow(workflow, prompt, quality, enhance_prompt, seed)
             info = await comfy_get(client, f"{COMFY_URL}/object_info", job=progress)
             info.raise_for_status()
             validate_workflow(workflow, info.json())
@@ -431,11 +456,11 @@ async def home(request: Request, notice: str = "", error: str = ""):
     edit_allowed = setting("allow_edit", "true") == "true"
     modes = "".join(f'<option value="{v}">{label}</option>' for v, label, allowed in [("text", "Create from description", text_allowed), ("edit", "Edit using a reference image", edit_allowed)] if allowed)
     blocked = len(json.loads(setting("blocked_terms", "[]")))
-    body = f'''<section class="card"><h2>Generate an image</h2><p class="muted">Prompts are checked against {blocked} admin-defined blocked phrase(s). Max prompt length: {html.escape(setting("max_prompt_chars", str(MAX_PROMPT_CHARS)))} characters.</p>{f'<p class="error">{html.escape(error)}</p>' if error else ''}<form id="generation-form" method="post" action="/generate" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{csrf(request)}"><label>Mode<select name="mode">{modes}</select></label><label>Reference use<select name="edit_intent"><option value="edit">Edit the reference image</option><option value="recreate">Create a new depiction of referenced subjects</option></select></label><label>Output size<select name="quality"><option value="standard">Standard — about 1K</option><option value="high">High — about 2K (slower)</option></select></label><label><input type="checkbox" name="enhance_prompt" value="true" checked> Automatically expand the description</label><label>Seed (optional)<input type="number" name="seed" min="0" max="4294967295" placeholder="Leave empty for a random result"></label><p class="muted">For a new style or pose, choose a new depiction and describe what should stay recognizable. Reference output follows Image 1's aspect ratio; text output is square.</p><label>Description<textarea name="prompt" rows="4" maxlength="{html.escape(setting("max_prompt_chars", str(MAX_PROMPT_CHARS)))}" required placeholder="Describe the image or the change you want"></textarea></label><label>Reference images (1–10 for edit mode)<input id="references" type="file" name="references" accept="image/png,image/jpeg,image/webp" multiple></label><p class="muted">Use “Image 1”, “Image 2”, etc. in your prompt. {MAX_UPLOAD_MB} MB per image, {MAX_REFERENCE_TOTAL_MB} MB total.</p><ol id="reference-list"></ol><script>const picker=document.getElementById("references");picker.addEventListener("change",()=>{{const files=Array.from(picker.files);picker.setCustomValidity(files.length>10?"Choose at most 10 reference images":"");const list=document.getElementById("reference-list");list.replaceChildren();files.forEach((file,index)=>{{const row=document.createElement("li");row.textContent="Image "+(index+1)+": "+file.name;list.appendChild(row);}});}});</script><button id="generation-submit">Generate</button></form>{progress_markup()}</section>'''
+    body = f'''<section class="card"><h2>Generate an image</h2><p class="muted">Prompts are checked against {blocked} admin-defined blocked phrase(s). Max prompt length: {html.escape(setting("max_prompt_chars", str(MAX_PROMPT_CHARS)))} characters.</p>{f'<p class="error">{html.escape(error)}</p>' if error else ''}<form id="generation-form" method="post" action="/generate" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{csrf(request)}"><label>Mode<select name="mode">{modes}</select></label>{rapid_controls()}<label>Reference use<select name="edit_intent"><option value="edit">Edit the reference image</option><option value="recreate">Create a new depiction of referenced subjects</option></select></label><label>Output size<select name="quality"><option value="standard">Standard — about 1K</option><option value="high">High — about 2K (slower)</option></select></label><label><input type="checkbox" name="enhance_prompt" value="true" checked> Automatically expand the description</label><label>Seed (optional)<input type="number" name="seed" min="0" max="4294967295" placeholder="Leave empty for a random result"></label><p class="muted">For a new style or pose, choose a new depiction and describe what should stay recognizable. Reference output follows Image 1's aspect ratio; text output is square.</p><label>Description<textarea name="prompt" rows="4" maxlength="{html.escape(setting("max_prompt_chars", str(MAX_PROMPT_CHARS)))}" required placeholder="Describe the image or the change you want"></textarea></label><label>Reference images (1–10 for edit mode)<input id="references" type="file" name="references" accept="image/png,image/jpeg,image/webp" multiple></label><p class="muted">Use “Image 1”, “Image 2”, etc. in your prompt. {MAX_UPLOAD_MB} MB per image, {MAX_REFERENCE_TOTAL_MB} MB total.</p><ol id="reference-list"></ol><script>const picker=document.getElementById("references");picker.addEventListener("change",()=>{{const files=Array.from(picker.files);picker.setCustomValidity(files.length>10?"Choose at most 10 reference images":"");const list=document.getElementById("reference-list");list.replaceChildren();files.forEach((file,index)=>{{const row=document.createElement("li");row.textContent="Image "+(index+1)+": "+file.name;list.appendChild(row);}});}});</script><button id="generation-submit">Generate</button></form>{progress_markup()}</section>'''
     with db() as conn:
         rows = conn.execute("SELECT id,prompt,created_at FROM generations WHERE user_id=? ORDER BY created_at DESC LIMIT 24", (user["id"],)).fetchall()
     images = "".join(f'<article><a href="/image/{row["id"]}"><img loading="lazy" src="/image/{row["id"]}"></a><small>{html.escape(row["prompt"][:160])}</small></article>' for row in rows)
-    body += f'<section class="card"><h2>Your recent images</h2><div class="grid">{images or "<p class=muted>No images yet.</p>"}</div></section>'
+    body += f'<section class="card"><h2>Your recent images</h2><div id="generation-gallery" class="grid">{images or "<p class=muted>No images yet.</p>"}</div></section>'
     return page("Home", body, user, notice, csrf(request))
 
 
@@ -445,7 +470,7 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
                                 csrf_token: str = Form(...), generation_job_id: str = Form(...),
                                 references: list[UploadFile] | None = File(None), reference: UploadFile | None = File(None),
                                 quality: str = Form("standard"), edit_intent: str = Form("edit"),
-                                enhance_prompt: bool = Form(False), seed: int | None = Form(None)):
+                                enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4)):
     user = current_user(request)
     if not user:
         return JSONResponse({"error": "Sign in again before generating."}, status_code=401)
@@ -467,11 +492,12 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
             images.append(validate_reference(await upload.read(MAX_UPLOAD_MB * 1024 * 1024 + 1)))
             validate_reference_set("edit", images)
         validate_reference_set(mode, images)
+        validate_selected_model(model, mode, images, rapid_steps, quality)
         job, created = JOBS.create(user["id"], generation_job_id)
         if created:
             async def operation(progress):
                 png = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent,
-                                         enhance_prompt=enhance_prompt, seed=seed, progress=progress)
+                                         enhance_prompt=enhance_prompt, seed=seed, progress=progress, model=model, rapid_steps=rapid_steps)
                 progress.update("saving", "Saving to your gallery")
                 image_id = uuid.uuid4().hex
                 user_dir = DATA_DIR / "images" / str(user["id"])
@@ -495,7 +521,7 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
 async def generate(request: Request, mode: str = Form(...), prompt: str = Form(...), csrf_token: str = Form(...),
                    references: list[UploadFile] | None = File(None), reference: UploadFile | None = File(None),
                    quality: str = Form("standard"), edit_intent: str = Form("edit"),
-                   enhance_prompt: bool = Form(False), seed: int | None = Form(None)):
+                   enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4)):
     user = current_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -516,7 +542,8 @@ async def generate(request: Request, mode: str = Form(...), prompt: str = Form(.
             images.append(validate_reference(await upload.read(MAX_UPLOAD_MB * 1024 * 1024 + 1)))
             validate_reference_set("edit", images)
         validate_reference_set(mode, images)
-        image_bytes = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent, enhance_prompt=enhance_prompt, seed=seed)
+        validate_selected_model(model, mode, images, rapid_steps, quality)
+        image_bytes = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent, enhance_prompt=enhance_prompt, seed=seed, model=model, rapid_steps=rapid_steps)
         image_id = uuid.uuid4().hex
         user_dir = DATA_DIR / "images" / str(user["id"])
         user_dir.mkdir(parents=True, exist_ok=True)
@@ -549,6 +576,8 @@ class BotGeneration(BaseModel):
     edit_intent: str = "edit"
     enhance_prompt: bool = True
     seed: int | None = Field(default=None, ge=0, le=4294967295)
+    model: str = "qwen21"
+    rapid_steps: int = 4
 
 
 # IMAGE_STUDIO_PROGRESS_V1_DISCORD_ROUTES
@@ -585,12 +614,13 @@ async def create_discord_job(request: Request, payload: BotGeneration):
             images.append(validate_reference(raw))
             validate_reference_set("edit", images)
         validate_reference_set(payload.mode, images)
+        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality)
         job, created = JOBS.create(owner, payload.generation_job_id or uuid.uuid4().hex)
         if created:
             async def operation(progress):
                 png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality,
                                          edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt,
-                                         seed=payload.seed, progress=progress)
+                                         seed=payload.seed, progress=progress, model=payload.model, rapid_steps=payload.rapid_steps)
                 progress.update("saving", "Preparing the Discord image")
                 with Image.open(io.BytesIO(png)) as image:
                     out = io.BytesIO()
@@ -650,7 +680,8 @@ async def discord_generate(request: Request, payload: BotGeneration):
             images.append(validate_reference(raw))
             validate_reference_set("edit", images)
         validate_reference_set(payload.mode, images)
-        png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality, edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt, seed=payload.seed)
+        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality)
+        png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality, edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt, seed=payload.seed, model=payload.model, rapid_steps=payload.rapid_steps)
         with Image.open(io.BytesIO(png)) as image:
             image = image.convert("RGB")
             out = io.BytesIO()

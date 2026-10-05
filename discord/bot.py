@@ -9,6 +9,7 @@ import os
 import aiohttp
 import discord
 from discord import app_commands
+# QWEN_RAPID_AIO_V19_INTEGRATION_V1
 
 
 TOKEN = os.getenv("DISCORD_TOKEN", "")
@@ -71,8 +72,13 @@ async def generate(interaction: discord.Interaction, mode: str, prompt: str, ref
     if mode == "edit" and not references:
         await interaction.response.send_message("Attach a reference image for `/edit`.", ephemeral=True)
         return
-    if len(references) > MAX_REFERENCES:
-        await interaction.response.send_message(f"Use at most {MAX_REFERENCES} reference images.", ephemeral=True)
+    model = options.get("model", "qwen21")
+    if model not in {"qwen21", "rapid_aio_v19"}:
+        await interaction.response.send_message("Choose a supported image model.", ephemeral=True)
+        return
+    reference_limit = 4 if model == "rapid_aio_v19" else MAX_REFERENCES
+    if len(references) > reference_limit:
+        await interaction.response.send_message(f"Use at most {reference_limit} reference images for this model.", ephemeral=True)
         return
     if any(image.size > MAX_UPLOAD for image in references):
         await interaction.response.send_message(f"Each reference image must be at most {MAX_UPLOAD // (1024 * 1024)} MB.", ephemeral=True)
@@ -105,9 +111,11 @@ async def generate(interaction: discord.Interaction, mode: str, prompt: str, ref
 @app_commands.guild_only()
 @app_commands.allowed_installs(guilds=True, users=False)
 @app_commands.describe(prompt="Describe the image you want")
+@app_commands.describe(model="Image model: Rapid AIO accepts up to 4 references; Qwen 2.1 accepts 10", rapid_steps="Rapid AIO sampling steps")
+@app_commands.choices(model=[app_commands.Choice(name="Qwen Image 2.1", value="qwen21"), app_commands.Choice(name="Qwen Rapid AIO v19 — NSFW", value="rapid_aio_v19")], rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
 @app_commands.choices(quality=[app_commands.Choice(name="Standard (1K)", value="standard"), app_commands.Choice(name="High (2K)", value="high")])
-async def imagine(interaction: discord.Interaction, prompt: str, quality: str = "standard", enhance_prompt: bool = True, seed: int | None = None):
-    await generate(interaction, "text", prompt, [], quality=quality, enhance_prompt=enhance_prompt, seed=seed)
+async def imagine(interaction: discord.Interaction, prompt: str, quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4):
+    await generate(interaction, "text", prompt, [], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, model=model, rapid_steps=rapid_steps)
 
 
 @bot.tree.command(name="edit", description="Create or edit an image using up to 10 reference images")
@@ -117,6 +125,8 @@ async def imagine(interaction: discord.Interaction, prompt: str, quality: str = 
                        reference2="Reference image 2", reference3="Reference image 3", reference4="Reference image 4",
                        reference5="Reference image 5", reference6="Reference image 6", reference7="Reference image 7",
                        reference8="Reference image 8", reference9="Reference image 9", reference10="Reference image 10")
+@app_commands.describe(model="Image model: Rapid AIO accepts up to 4 references; Qwen 2.1 accepts 10", rapid_steps="Rapid AIO sampling steps")
+@app_commands.choices(model=[app_commands.Choice(name="Qwen Image 2.1", value="qwen21"), app_commands.Choice(name="Qwen Rapid AIO v19 — NSFW", value="rapid_aio_v19")], rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
 @app_commands.choices(quality=[app_commands.Choice(name="Standard (1K)", value="standard"), app_commands.Choice(name="High (2K)", value="high")])
 async def edit(interaction: discord.Interaction, prompt: str, reference: discord.Attachment,
                reference2: discord.Attachment | None = None, reference3: discord.Attachment | None = None,
@@ -124,10 +134,10 @@ async def edit(interaction: discord.Interaction, prompt: str, reference: discord
                reference6: discord.Attachment | None = None, reference7: discord.Attachment | None = None,
                reference8: discord.Attachment | None = None, reference9: discord.Attachment | None = None,
                reference10: discord.Attachment | None = None, recreate: bool = False,
-               quality: str = "standard", enhance_prompt: bool = True, seed: int | None = None):
+               quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4):
     await generate(interaction, "edit", prompt, [image for image in
         (reference, reference2, reference3, reference4, reference5, reference6, reference7, reference8, reference9, reference10)
-        if image is not None], quality=quality, enhance_prompt=enhance_prompt, seed=seed, edit_intent="recreate" if recreate else "edit")
+        if image is not None], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, edit_intent="recreate" if recreate else "edit", model=model, rapid_steps=rapid_steps)
 
 
 @bot.event

@@ -14,4 +14,5 @@ RUN git init /opt/ComfyUI \
     && pip install --no-cache-dir -r /tmp/comfy-requirements.txt
 COPY custom_nodes/studio_qwen_references /opt/ComfyUI/custom_nodes/studio_qwen_references
 COPY custom_nodes/studio_qwen21_quality /opt/ComfyUI/custom_nodes/studio_qwen21_quality
+COPY custom_nodes/studio_rapid_aio /opt/ComfyUI/custom_nodes/studio_rapid_aio
 EXPOSE 8188

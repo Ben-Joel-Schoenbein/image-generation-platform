@@ -20,3 +20,6 @@ qwen-upgrade-backups/
 
 __pycache__/
 *.pyc
+/rapid-aio-backups/
+/models/checkpoints/*.part
+/models/checkpoints/*.safetensors
