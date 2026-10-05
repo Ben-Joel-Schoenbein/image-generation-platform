@@ -1,0 +1,138 @@
+name: friends-image-studio
+
+services:
+  web:
+    build: ./web
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      COMFY_URL: http://comfyui:8188
+      WORKFLOW_TEXT: /workflows/text2img.api.json
+      WORKFLOW_EDIT: /workflows/img2img.api.json
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?Set ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      COOKIE_HTTPS_ONLY: "true"
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-15}
+      MAX_REFERENCE_TOTAL_MB: ${MAX_REFERENCE_TOTAL_MB:-60}
+      DISCORD_BOT_SECRET: ${DISCORD_BOT_SECRET:-}
+    volumes:
+      - ./data:/data
+      - ./workflows:/workflows:ro
+    expose:
+      - "8000"
+    depends_on:
+      comfyui:
+        condition: service_healthy
+
+  comfyui:
+    build:
+      context: ./comfyui
+      args:
+        PYTORCH_BASE: ${PYTORCH_BASE:-pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime}
+    restart: unless-stopped
+    command: ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188"]
+    volumes:
+      - ./models:/opt/ComfyUI/models
+      - ./comfy-output:/opt/ComfyUI/output
+    expose:
+      - "8188"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8188/system_stats', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      LIBRARY_DOMAIN: ${LIBRARY_DOMAIN:?Set LIBRARY_DOMAIN in .env}
+      LIBRARY_AUTH_USER: ${LIBRARY_AUTH_USER:?Set LIBRARY_AUTH_USER in .env}
+      LIBRARY_AUTH_HASH: ${LIBRARY_AUTH_HASH:?Set LIBRARY_AUTH_HASH in .env}
+      MEDIA_PROXY_SECRET: ${MEDIA_PROXY_SECRET:?Set MEDIA_PROXY_SECRET in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - media-web
+      - media-api
+
+  media-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-image_library}
+      POSTGRES_USER: ${POSTGRES_USER:-image_library}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    expose:
+      - "5432"
+
+  media-api:
+    build: ./media-api
+    restart: unless-stopped
+    environment:
+      PGHOST: media-db
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-image_library}
+      PGUSER: ${POSTGRES_USER:-image_library}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      MEDIA_DIR: /media
+      MAX_UPLOAD_MB: ${MEDIA_MAX_UPLOAD_MB:-20}
+      MEDIA_PROXY_SECRET: ${MEDIA_PROXY_SECRET:?Set MEDIA_PROXY_SECRET in .env}
+    volumes:
+      - ./media-files:/media
+    expose:
+      - "4000"
+    depends_on:
+      media-db:
+        condition: service_healthy
+
+  media-web:
+    build:
+      context: ./media-web
+      args:
+        VITE_IMAGE_STUDIO_URL: ${IMAGE_STUDIO_URL:-https://images.example.com}
+    restart: unless-stopped
+    expose:
+      - "80"
+    depends_on:
+      - media-api
+
+  discord:
+    build: ./discord
+    restart: unless-stopped
+    profiles: ["discord"]
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_BOT_SECRET: ${DISCORD_BOT_SECRET:-}
+      IMAGE_STUDIO_API: http://web:8000/internal/discord/generate
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-15}
+      MAX_REFERENCE_TOTAL_MB: ${MAX_REFERENCE_TOTAL_MB:-60}
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:

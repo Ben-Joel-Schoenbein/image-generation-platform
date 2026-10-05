@@ -1,0 +1,33 @@
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+	@blocked path /internal/* /comfyui/* /api/comfy/*
+	handle @blocked {
+		respond 404
+	}
+	reverse_proxy web:8000
+}
+
+{$LIBRARY_DOMAIN} {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+	basic_auth {
+		{$LIBRARY_AUTH_USER} {$LIBRARY_AUTH_HASH}
+	}
+	@backend path /graphql /upload /media/* /health
+	handle @backend {
+		reverse_proxy media-api:4000 {
+			header_up -X-Media-Proxy-Secret
+			header_up X-Media-Proxy-Secret {$MEDIA_PROXY_SECRET}
+		}
+	}
+	reverse_proxy media-web:80
+}
