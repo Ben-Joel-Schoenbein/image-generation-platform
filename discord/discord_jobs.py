@@ -1,3 +1,4 @@
+# IMAGE_STUDIO_HERETIC_PE_V1
 """Wait for background image jobs without depending on a long-lived interaction token."""
 import asyncio
 import contextlib
@@ -46,6 +47,7 @@ async def wait_for_job(session, api_url, secret, payload, update):
             if job["state"] == "error":
                 raise ImageServiceError(job.get("error") or "Image generation failed")
             if job["state"] == "done":
+                payload["_expanded_prompt"] = job.get("expanded_prompt")
                 async with session.get(endpoint + "/" + job_id + "/image", headers=headers, params=params) as response:
                     if response.status != 200:
                         raise ImageServiceError("The finished image could not be retrieved.")
@@ -89,12 +91,18 @@ async def deliver_generation(interaction, session, api_url, secret, payload):
     try:
         image = await wait_for_job(session, api_url, secret, payload, update)
         attachment = discord.File(io.BytesIO(image), filename="generated.jpg")
+        attachments = [attachment]
+        if payload.get("_expanded_prompt"):
+            attachments.append(discord.File(io.BytesIO(payload["_expanded_prompt"].encode("utf-8")), filename="expanded-prompt.txt"))
         try:
             await waiting.edit(content=f"{interaction.user.mention} · Image ready",
-                               attachments=[attachment], allowed_mentions=discord.AllowedMentions.none())
+                               attachments=attachments, allowed_mentions=discord.AllowedMentions.none())
         except discord.NotFound:
             attachment = discord.File(io.BytesIO(image), filename="generated.jpg")
-            await channel.send(f"{interaction.user.mention} · Image ready", file=attachment,
+            attachments = [attachment]
+            if payload.get("_expanded_prompt"):
+                attachments.append(discord.File(io.BytesIO(payload["_expanded_prompt"].encode("utf-8")), filename="expanded-prompt.txt"))
+            await channel.send(f"{interaction.user.mention} · Image ready", files=attachments,
                                allowed_mentions=discord.AllowedMentions.none())
     except (ImageServiceError, aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException, KeyError) as exc:
         with contextlib.suppress(discord.HTTPException):

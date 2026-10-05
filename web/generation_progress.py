@@ -1,3 +1,4 @@
+# IMAGE_STUDIO_HERETIC_PE_V1
 """Per-user background jobs and real ComfyUI progress for Image Studio."""
 import asyncio
 import contextlib
@@ -34,6 +35,9 @@ class GenerationJob:
     updated: float = field(default_factory=time.monotonic)
     finished: float | None = None
     prompt_id: str | None = None
+    expanded_prompt: str | None = None
+    prompt_expansion: str = "off"
+    expansion_seconds: float | None = None
     image_bytes: bytes | None = field(default=None, repr=False)
 
     def update(self, stage, label, percent=None, detail=""):
@@ -56,6 +60,8 @@ class GenerationJob:
         return {"id": self.id, "state": self.state, "stage": self.stage,
                 "label": self.label, "percent": self.percent, "detail": self.detail,
                 "result_url": self.result_url, "error": self.error,
+                "expanded_prompt": self.expanded_prompt, "prompt_expansion": self.prompt_expansion,
+                "expansion_seconds": self.expansion_seconds,
                 "elapsed": round((self.finished or time.monotonic()) - self.created),
                 "update_age": round(time.monotonic() - self.updated)}
 
@@ -175,7 +181,7 @@ class ProgressMonitor:
         kind = event.get("type")
         if not isinstance(data, dict) or kind not in {
             "execution_start", "executing", "progress", "execution_success",
-            "execution_error", "execution_interrupted"
+            "execution_error", "execution_interrupted", "executed"
         }:
             return
         if self.prompt_id is None:
@@ -183,6 +189,12 @@ class ProgressMonitor:
                 self.pending.append(event)
             return
         if data.get("prompt_id", self.prompt_id) != self.prompt_id:
+            return
+        if kind == "executed":
+            if str(data.get("node")) == "900":
+                preview = data.get("output", {}).get("text", [])
+                if preview and isinstance(preview[0], str):
+                    self.job.expanded_prompt = preview[0]
             return
         if kind == "execution_start":
             self.job.update("preparing", "Preparing models and references")

@@ -1,0 +1,23 @@
+# IMAGE_STUDIO_HERETIC_PE_V1 — use studio-compose.sh to include this extension.
+services:
+  web:
+    environment:
+      HERETIC_URL: http://prompt-enhancer:8080
+      HERETIC_MIN_FREE_GB: "16"
+  prompt-enhancer:
+    image: ghcr.io/ggml-org/llama.cpp@sha256:ef08b5a98b1170f2b62177be0a4027c88a84043c55afbf190dd18b9e7cdcfebf
+    restart: unless-stopped
+    stop_grace_period: 45s
+    # HERETIC_NETWORKS
+    networks: ["default"]
+    command: ["--host", "0.0.0.0", "--port", "8080", "--models-preset", "/config/models.ini", "--models-max", "1", "--no-models-autoload"]
+    volumes:
+      - ./models/prompt_enhancers:/models:ro
+      - ./prompt-enhancer/models.ini:/config/models.ini:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

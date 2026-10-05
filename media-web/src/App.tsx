@@ -1,5 +1,6 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { gql, useMutation, useQuery } from "@apollo/client";
+import ImagePreview from "./ImagePreview";
 
 const IMAGE_STUDIO_URL = import.meta.env.VITE_IMAGE_STUDIO_URL || "https://images.example.com";
 
@@ -32,10 +33,29 @@ function App() {
   const [updateCollection] = useMutation(UPDATE_COLLECTION, { refetchQueries: [{ query: COLLECTIONS }] });
   const [deleteCollection] = useMutation(DELETE_COLLECTION, { refetchQueries: [{ query: COLLECTIONS }] });
   const [updateImage] = useMutation(UPDATE_IMAGE, { refetchQueries: [{ query: IMAGES, variables: { collectionId: selectedId } }] });
-  const [deleteImage] = useMutation(DELETE_IMAGE, { refetchQueries: [{ query: IMAGES, variables: { collectionId: selectedId } }] });
+  const [deleteImage, { loading: deleting }] = useMutation(DELETE_IMAGE, {
+    awaitRefetchQueries: true,
+    refetchQueries: [{ query: IMAGES, variables: { collectionId: selectedId } }],
+    update(cache, _result, { variables }) {
+      cache.evict({ id: cache.identify({ __typename: "MediaImage", id: variables?.id }) });
+      cache.gc();
+    },
+  });
   const [removeImage] = useMutation(REMOVE_IMAGE, { refetchQueries: [{ query: IMAGES, variables: { collectionId: selectedId } }] });
   const [moveImage] = useMutation(MOVE_IMAGE, { refetchQueries: [{ query: IMAGES, variables: { collectionId: selectedId } }] });
   const [notice, setNotice] = useState("");
+  const [preview, setPreview] = useState<MediaImage | null>(null);
+  const deleteInFlight = useRef(false);
+
+  async function deleteSelectedImage(image: { id: string; title: string }) {
+    if (deleteInFlight.current || deleting || !confirm(`„${image.title || "Dieses Bild"}“ endgültig aus allen Archivgruppen und vom Server löschen?`)) return false;
+    deleteInFlight.current = true;
+    try {
+      const result = await deleteImage({ variables: { id: image.id } });
+      setNotice(result.data?.deleteImage ? "Bild gelöscht." : "Das Bild wurde bereits gelöscht.");
+      return true;
+    } finally { deleteInFlight.current = false; }
+  }
 
   async function submitCollection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -97,10 +117,11 @@ function App() {
           <div className="panel collectionInfo"><div><p className="eyebrow">AUSGEWÄHLTE GRUPPE</p><h2>{active.name}</h2><p className="muted">{images.length} {images.length === 1 ? "Bild" : "Bilder"}</p></div><button className="danger ghost" onClick={async () => { if (confirm(`„${active.name}“ samt Untergruppen löschen? Bilder, die nur dort gespeichert sind, werden ebenfalls gelöscht.`)) { await deleteCollection({ variables: { id: active.id } }); setSelectedId(""); } }}>Gruppe löschen</button></div>
           <form onSubmit={saveCollection} className="panel editGroup"><label>Gruppenname<input key={`${active.id}-name`} name="name" defaultValue={active.name} required maxLength={180} /></label><label>Beschreibung<textarea key={`${active.id}-description`} name="description" rows={2} defaultValue={active.description} maxLength={2000} /></label><button className="secondary">Gruppeninfos speichern</button></form>
           <section className="panel"><h3>Bild hinzufügen</h3><form onSubmit={submitUpload} className="uploadForm"><label>Datei<input name="file" type="file" accept="image/png,image/jpeg,image/webp" required /></label><label>Titel<input name="title" maxLength={200} placeholder="Optional" /></label><label>Beschreibung<input name="description" maxLength={4000} placeholder="Optional" /></label><button className="primary">Hochladen</button><small>PNG, JPEG oder WebP · bis zu 20 MB</small></form></section>
-          <section className="imageList"><div className="listHeader"><h3>Bilder / Seiten</h3><span className="muted">Pfeile ändern die Reihenfolge</span></div>{imagesResult.loading ? <p>Lade Bilder …</p> : images.length ? <div className="cards">{images.map((image, index) => <ImageCard key={image.id} image={image} index={index} total={images.length} onSave={async (title, description) => { await updateImage({ variables: { id: image.id, title, description } }); setNotice("Bildinfos gespeichert."); }} onDelete={async () => { if (confirm(`„${image.title}“ endgültig löschen?`)) { await deleteImage({ variables: { id: image.id } }); setNotice("Bild gelöscht."); } }} onRemove={async () => { if (confirm(`„${image.title}“ aus dieser Gruppe entfernen? Wenn keine weitere Gruppe mit dem Bild verknüpft ist, wird auch die Datei gelöscht.`)) { await removeImage({ variables: { collectionId: selectedId, imageId: image.id } }); setNotice("Bild aus dieser Gruppe entfernt."); } }} onMove={(position) => moveImage({ variables: { collectionId: selectedId, imageId: image.id, position } })} />)}</div> : <div className="empty smallEmpty"><p>Hier ist noch nichts. Lade Bilder in diese Gruppe hoch.</p></div>}</section>
+          <section className="imageList"><div className="listHeader"><h3>Bilder / Seiten</h3><span className="muted">Pfeile ändern die Reihenfolge</span></div>{imagesResult.loading ? <p>Lade Bilder …</p> : images.length ? <div className="cards">{images.map((image, index) => <ImageCard key={image.id} image={image} index={index} total={images.length} onSave={async (title, description) => { await updateImage({ variables: { id: image.id, title, description } }); setNotice("Bildinfos gespeichert."); }} onPreview={() => setPreview(image)} deleting={deleting} onDelete={async () => { try { await deleteSelectedImage(image); } catch (e) { setNotice(message(e)); } }} onRemove={async () => { if (confirm(`„${image.title}“ aus dieser Gruppe entfernen? Wenn keine weitere Gruppe mit dem Bild verknüpft ist, wird auch die Datei gelöscht.`)) { await removeImage({ variables: { collectionId: selectedId, imageId: image.id } }); setNotice("Bild aus dieser Gruppe entfernt."); } }} onMove={(position) => moveImage({ variables: { collectionId: selectedId, imageId: image.id, position } })} />)}</div> : <div className="empty smallEmpty"><p>Hier ist noch nichts. Lade Bilder in diese Gruppe hoch.</p></div>}</section>
         </>}
       </section>
     </div>
+    {preview && <ImagePreview key={preview.id} image={preview} busy={deleting} onClose={() => setPreview(null)} onDelete={deleteSelectedImage} />}
     <footer>Bilddateien liegen auf diesem Server. Gruppen, Beschreibungen und Reihenfolge liegen in PostgreSQL.</footer>
   </main>;
 }
@@ -109,12 +130,12 @@ function CollectionNav({ item, selectedId, onSelect, depth }: { item: Collection
   return <div><button className={`treeItem ${selectedId === item.id ? "active" : ""}`} style={{ paddingLeft: 12 + depth * 17 }} onClick={() => onSelect(item.id)}><span>{depth ? "↳" : "▣"}</span>{item.name}</button>{item.children?.map((child) => <CollectionNav key={child.id} item={child} selectedId={selectedId} onSelect={onSelect} depth={depth + 1} />)}</div>;
 }
 
-function ImageCard({ image, index, total, onSave, onDelete, onRemove, onMove }: { image: MediaImage; index: number; total: number; onSave: (title: string, description: string) => Promise<void>; onDelete: () => Promise<void>; onRemove: () => Promise<void>; onMove: (position: number) => void }) {
+function ImageCard({ image, index, total, onSave, onDelete, onRemove, onMove, onPreview, deleting }: { image: MediaImage; index: number; total: number; onSave: (title: string, description: string) => Promise<void>; onDelete: () => Promise<void>; onRemove: () => Promise<void>; onMove: (position: number) => void; onPreview: () => void; deleting: boolean }) {
   const [title, setTitle] = useState(image.title);
   const [description, setDescription] = useState(image.description);
   const [saving, setSaving] = useState(false);
   async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); await onSave(title, description); setSaving(false); }
-  return <article className="imageCard"><a href={image.url} target="_blank" rel="noreferrer"><img src={image.url} alt={image.title} loading="lazy" /></a><div className="imageMeta"><small>{image.width && image.height ? `${image.width} × ${image.height} · ` : ""}{formatSize(image.size)}</small><form onSubmit={submit} className="stack"><label>Titel<input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} /></label><label>Beschreibung<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={4000} /></label><button className="secondary" disabled={saving}>{saving ? "Speichere …" : "Speichern"}</button></form><div className="actions"><button title="Nach oben" disabled={index === 0} onClick={() => onMove(index - 1)}>↑</button><button title="Nach unten" disabled={index === total - 1} onClick={() => onMove(index + 1)}>↓</button><button className="mutedButton" onClick={onRemove}>Aus Gruppe entfernen</button><button className="danger" onClick={onDelete}>Löschen</button></div></div></article>;
+  return <article className="imageCard"><button className="imagePreviewTrigger" aria-label={`Bild ansehen: ${image.title}`} onClick={onPreview}><img src={image.url} alt={image.title} loading="lazy" /></button><div className="imageMeta"><small>{image.width && image.height ? `${image.width} × ${image.height} · ` : ""}{formatSize(image.size)}</small><form onSubmit={submit} className="stack"><label>Titel<input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} /></label><label>Beschreibung<textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={4000} /></label><button className="secondary" disabled={saving}>{saving ? "Speichere …" : "Speichern"}</button></form><div className="actions"><button title="Nach oben" disabled={index === 0} onClick={() => onMove(index - 1)}>↑</button><button title="Nach unten" disabled={index === total - 1} onClick={() => onMove(index + 1)}>↓</button><button className="mutedButton" onClick={onRemove}>Aus Gruppe entfernen</button><button className="danger" disabled={deleting} onClick={() => { void onDelete(); }}>Löschen</button></div></div></article>;
 }
 
 function formatSize(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`; }

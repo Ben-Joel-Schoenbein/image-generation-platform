@@ -1,3 +1,4 @@
+// # IMAGE_STUDIO_HERETIC_PE_V1
 (() => {
   'use strict';
   const form = document.getElementById('generation-form');
@@ -25,6 +26,12 @@
   }
   function draw(job) {
     snapshot = job; observed = Date.now();
+    const preview = document.getElementById('expanded-prompt-text');
+    const previewPanel = document.getElementById('expanded-prompt-panel');
+    if (preview && previewPanel) {
+      preview.textContent = job.expanded_prompt || '';
+      previewPanel.hidden = !job.expanded_prompt;
+    }
     panel.hidden = false; panel.dataset.state = job.state;
     label.textContent = job.label;
     detail.textContent = job.detail || '';
@@ -94,6 +101,8 @@
     label.textContent = 'Uploading and validating your request';
     message.textContent = ''; detail.textContent = ''; bar.removeAttribute('value');
     snapshot = {elapsed: 0}; observed = Date.now();
+    const previewPanel = document.getElementById('expanded-prompt-panel');
+    if (previewPanel) previewPanel.hidden = true;
     const bytes = crypto.getRandomValues(new Uint8Array(16));
     const id = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
     const payload = new FormData(form);

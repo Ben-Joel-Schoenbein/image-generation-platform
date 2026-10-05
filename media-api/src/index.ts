@@ -7,6 +7,7 @@ import sharp from "sharp";
 import { ApolloServer } from "@apollo/server";
 import { expressMiddleware } from "@as-integrations/express4";
 import { Pool } from "pg";
+import { cleanupDeletedImages, deleteMediaImage, initImageDeletion } from "./image-deletion";
 
 const PORT = Number(process.env.PORT || 4000);
 const MEDIA_DIR = path.resolve(process.env.MEDIA_DIR || "/media");
@@ -198,11 +199,7 @@ const resolvers = {
       return result.rows[0];
     },
     deleteImage: async (_: unknown, args: { id: string }) => {
-      const row = await imageById(args.id);
-      if (!row) return false;
-      await pool.query(`DELETE FROM media_images WHERE id=$1`, [args.id]);
-      await unlink(path.join(MEDIA_DIR, row.storageKey)).catch(() => undefined);
-      return true;
+      return deleteMediaImage(pool, MEDIA_DIR, args.id);
     },
     removeImageFromCollection: async (_: unknown, args: { collectionId: string; imageId: string }) => {
       const client = await pool.connect();
@@ -277,7 +274,7 @@ app.get("/media/:id", async (req: Request, res: Response) => {
   try {
     const row = await imageById(req.params.id);
     if (!row) return res.sendStatus(404);
-    return res.sendFile(path.join(MEDIA_DIR, row.storageKey), { headers: { "Cache-Control": "private, max-age=3600" } });
+    return res.sendFile(path.join(MEDIA_DIR, row.storageKey), { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return res.sendStatus(500);
   }
@@ -336,6 +333,16 @@ async function writeFileSafe(destination: string, data: Buffer) {
 async function main() {
   if (MEDIA_PROXY_SECRET.length < 32) throw new Error("MEDIA_PROXY_SECRET must contain at least 32 characters");
   await initDatabase();
+  await initImageDeletion(pool);
+  await cleanupDeletedImages(pool, MEDIA_DIR);
+  let cleaning = false;
+  setInterval(async () => {
+    if (cleaning) return;
+    cleaning = true;
+    try { await cleanupDeletedImages(pool, MEDIA_DIR); }
+    catch (error) { console.error("Image cleanup failed; retrying:", error); }
+    finally { cleaning = false; }
+  }, 30_000).unref();
   const server = new ApolloServer({ typeDefs, resolvers });
   await server.start();
   app.use(express.json({ limit: "1mb" }));

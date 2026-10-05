@@ -23,3 +23,6 @@ __pycache__/
 /rapid-aio-backups/
 /models/checkpoints/*.part
 /models/checkpoints/*.safetensors
+/models/prompt_enhancers/
+/web/heretic_prompts/
+/image-delete-backups/

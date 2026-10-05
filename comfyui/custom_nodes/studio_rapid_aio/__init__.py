@@ -64,3 +64,22 @@ class StudioRapidAIOTextEncode:
 
 NODE_CLASS_MAPPINGS = {"StudioRapidAIOTextEncode": StudioRapidAIOTextEncode}
 NODE_DISPLAY_NAME_MAPPINGS = {"StudioRapidAIOTextEncode": "Qwen Rapid AIO — up to 4 references"}
+
+
+class StudioCapturePrompt:
+    """Publish the final prompt through history and executed websocket events."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"text": ("STRING", {"forceInput": True})}}
+
+    RETURN_TYPES = ("STRING",)
+    FUNCTION = "capture"
+    CATEGORY = "text/studio"
+    OUTPUT_NODE = True
+
+    def capture(self, text):
+        return {"ui": {"text": [text]}, "result": (text,)}
+
+
+NODE_CLASS_MAPPINGS["StudioCapturePrompt"] = StudioCapturePrompt
+NODE_DISPLAY_NAME_MAPPINGS["StudioCapturePrompt"] = "Image Studio — expanded description"

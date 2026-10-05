@@ -111,12 +111,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('generation-form');
   if (!form) return;
   const model = form.elements.model, picker = form.elements.references;
-  const enhancer = form.elements.enhance_prompt;
+  const enhancer = form.elements.prompt_expansion || form.elements.enhance_prompt;
+  const readEnhancer = () => enhancer.tagName === 'SELECT' ? enhancer.value : enhancer.checked;
+  const writeEnhancer = value => { if (enhancer.tagName === 'SELECT') enhancer.value = value; else enhancer.checked = value; };
   const steps = form.elements.rapid_steps;
   const stepLabel = document.getElementById('rapid-steps-label');
   const help = document.getElementById('rapid-model-help');
   let previous = model.value;
-  const preferences = {qwen21: enhancer.checked, rapid_aio_v19: false};
+  const preferences = {qwen21: readEnhancer(), rapid_aio_v19: enhancer.tagName === 'SELECT' ? 'off' : false};
   const check = () => {
     const limit = model.value === 'rapid_aio_v19' ? 4 : 10;
     picker.setCustomValidity(picker.files.length > limit ? `Choose at most ${limit} reference images for this model` : '');
@@ -129,8 +131,8 @@ document.addEventListener('DOMContentLoaded', () => {
     check();
   };
   model.addEventListener('change', () => {
-    preferences[previous] = enhancer.checked;
-    enhancer.checked = preferences[model.value] ?? false;
+    preferences[previous] = readEnhancer();
+    writeEnhancer(preferences[model.value] ?? (enhancer.tagName === 'SELECT' ? 'off' : false));
     previous = model.value; update();
   });
   picker.addEventListener('change', check);

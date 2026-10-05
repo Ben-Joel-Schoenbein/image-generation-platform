@@ -1,0 +1,11 @@
+#image-preview{background:#1b2030;color:#edf0f7;border:1px solid #46506a;border-radius:14px;width:min(900px,calc(100% - 32px));max-height:90vh;box-sizing:border-box;padding:20px;overflow:auto}
+#image-preview::backdrop{background:#000b}
+.preview-heading,.preview-actions{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.preview-heading h2{margin:0 0 12px}.preview-heading button{margin-left:auto}
+#image-preview-image{display:block;max-width:100%;max-height:65vh;object-fit:contain;margin:12px auto}
+#image-preview-caption{overflow-wrap:anywhere;white-space:pre-wrap}
+#image-preview .gallery-danger{background:#b93546}#image-preview button:disabled{opacity:.55;cursor:wait}
+#image-preview-error{color:#ffd5dc;background:#482929;padding:12px;border-radius:8px}
+#gallery-notice:empty{display:none}#gallery-notice{color:#c9f7df}
+#generation-gallery a:focus-visible{outline:3px solid #bcb4ff;display:block;border-radius:10px}
+#generation-result{cursor:zoom-in}#generation-result:focus-visible{outline:3px solid #bcb4ff}
