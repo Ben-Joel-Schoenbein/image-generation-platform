@@ -20,16 +20,17 @@ Das Script installiert keine Betriebssystempakete, Treiber oder DNS-Einträge. `
 
 ## Einmal auf einem neuen Server ausführen
 
-Kopiere `image-studio-setup.zip` in dein Home-Verzeichnis auf dem Server. Klone außerdem das aktuelle Repository, falls es dort noch nicht vorhanden ist:
+Klone das aktuelle Repository und starte das darin gespeicherte Setup:
 
 ```bash
-git clone https://github.com/Ben-Joel-Schoenbein/image-generation-platform.git ~/Imagegen-server-new
-python3 -m zipfile -e ~/image-studio-setup.zip ~/
+git clone https://github.com/Ben-Joel-Schoenbein/image-generation-platform.git ~/image-studio
+cd ~/image-studio
 sudo -v
-bash ~/image-studio-setup/scripts/setup.sh --project ~/Imagegen-server-new
-cd ~/Imagegen-server-new
+bash scripts/setup.sh
 sudo docker compose up -d
 ```
+
+Für v23 NSFW beim Setup `--rapid-v23` ergänzen.
 
 Während des Setups wirst du nach Generator-Domain, Archiv-Domain und den Zugangsdaten gefragt. Bei den beiden Passwörtern erzeugt Enter jeweils ein zufälliges Passwort. Ein Discord-Bot-Token ist optional; mit Enter bleibt der Bot deaktiviert.
 
@@ -37,41 +38,52 @@ Neu eingerichtete Generator- und Archiv-Zugangsdaten stehen anschließend im Pro
 
 Das Setup setzt `COMPOSE_FILE` in `.env` auf die Compose-Dateien einschließlich `compose.heretic.yaml`. Discord wird über `COMPOSE_PROFILES` aktiviert, sobald ein Token hinterlegt ist. Dadurch funktioniert der normale Compose-Start. Für diese Variablen dürfen keine abweichenden Werte in der aufrufenden Shell exportiert sein; das Script erkennt solche Überschreibungen und bricht ab.
 
-## Setup und überarbeitete README ins Repository übernehmen
+## Setup im Repository
 
-Damit zukünftige Installationen direkt aus dem Repository funktionieren, kopiere nach dem Entpacken die drei Setup-Dateien in dessen `scripts`-Ordner:
+Die Setup-Dateien liegen im Repository unter `scripts/`. Nach Übernahme der v23-Integration sind dort auch `download-rapid-v23.py` und `test-rapid-v23.py` verfügbar. Modelle, private Zugangsdaten und bestehende Bilder werden lokal auf dem Server gespeichert.
+
+## Rapid AIO v23 NSFW auf dem bestehenden Server ergänzen
+
+Nachdem die v23-Integrationsdateien im Repository liegen, genügt im Projektordner:
 
 ```bash
-mkdir -p ~/Imagegen-server-new/scripts
-cp ~/image-studio-setup/scripts/setup.sh ~/Imagegen-server-new/scripts/
-cp ~/image-studio-setup/scripts/setup.py ~/Imagegen-server-new/scripts/
-cp ~/image-studio-setup/scripts/model-manifest.json ~/Imagegen-server-new/scripts/
-cp ~/image-studio-setup/repository/README.md ~/Imagegen-server-new/README.md
+python3 scripts/download-rapid-v23.py
+bash studio-compose.sh up -d --build web discord
 ```
 
-Die Datei `repository/README.md` ist die überarbeitete Haupt-README des Projekts. Sie ersetzt die alte Startanleitung und die veralteten Modellangaben. Prüfe den Diff, wenn du in deiner eigenen README weitere Änderungen vorgenommen hast.
+Es wird nur `Qwen-Rapid-AIO-NSFW-v23.safetensors` zusätzlich geladen: etwa 28,4 GB mit fortsetzbarem Download und SHA-256-Prüfung. Die SFW-Variante ist nicht enthalten. Das Script reserviert außerdem 20 GiB freien Speicher. Der bestehende v19-Checkpoint bleibt verfügbar.
 
-Nimm die drei Setup-Dateien und die überarbeitete `README.md` in deinen nächsten Commit auf. Anschließend lautet der Ablauf auf einem vorbereiteten neuen Server:
+Für einen neuen Server kann v23 direkt beim Setup mitgeladen werden:
 
 ```bash
-git clone https://github.com/Ben-Joel-Schoenbein/image-generation-platform.git
-cd image-generation-platform
-bash scripts/setup.sh
+bash scripts/setup.sh --rapid-v23
 sudo docker compose up -d
 ```
 
-Dieses Paket wurde bereitgestellt; die Dateien wurden nicht automatisch in dein GitHub-Repository geschrieben.
+Damit sind es insgesamt etwa 121 GB Modelldateien. Ohne `--rapid-v23` lädt das Setup die bisherigen 13 Dateien mit etwa 93 GB.
+
+In Website und Discord unter `model` **Qwen Rapid AIO v23 — NSFW** wählen. Mit 4 Schritten, 1K und Prompt-Erweiterung Off beginnen. Standard und Heretic lassen sich weiterhin ausdrücklich auswählen. Rapid AIO unterstützt maximal vier Referenzbilder; Qwen Image 2.1 weiterhin zehn. Die Discord-Auswahl nach dem Neustart des Bots mit Ctrl+R aktualisieren und einen neuen Slash-Command beginnen.
+
+Ein automatischer Vergleich erzeugt je ein Bild mit v19 und v23 bei denselben Einstellungen:
+
+```bash
+bash studio-compose.sh exec -T web python - --compare-v19 < scripts/test-rapid-v23.py
+bash studio-compose.sh cp web:/data/rapid-v23-tests ~/rapid-v23-tests
+```
+
+Die Bilder und JSON-Dateien mit Laufzeit und Einstellungen liegen danach unter `~/rapid-v23-tests`. Der vollständige Testablauf mit eigenen Referenzen und Prompt-Erweiterung steht in [docs/rapid-v23.md](docs/rapid-v23.md).
 
 ## Enthaltene Modelle und Konfiguration
 
 | Verwendung | Dateien |
 | --- | --- |
 | Aktuelle Qwen-Image-2.1-Workflows | BF16-Diffusionsmodell, Qwen3-VL-8B-Encoder, BF16-VAE und beide regulären PE-Encoder in `int8_convrot` |
-| Rapid AIO | `Qwen-Rapid-AIO-NSFW-v19.safetensors` |
+| Rapid AIO v19 NSFW | `Qwen-Rapid-AIO-NSFW-v19.safetensors` |
+| Optional Rapid AIO v23 NSFW | `Qwen-Rapid-AIO-NSFW-v23.safetensors` |
 | Heretic für Textprompts | `pe_t2i_heretic-Q4_K_M.gguf`, Systemprompt und Lizenz |
 | Heretic für Bildbearbeitung | `pe_i2i_heretic-Q4_K_M.gguf`, BF16-Multimodal-Projektor, Systemprompt und Lizenz |
 
-Es sind 13 Dateien mit zusammen 92.518.531.074 Bytes. Die Quellen stehen mit festen Hugging-Face-Revisionen und Prüfsummen in `scripts/model-manifest.json`. Die vollständigen Dateinamen werden vor dem Download angezeigt.
+Ohne v23 sind es 13 Dateien mit zusammen 92.518.531.074 Bytes; mit `--rapid-v23` zusätzlich 28.431.840.023 Bytes. Die Quellen stehen mit festen Hugging-Face-Revisionen und Prüfsummen in `scripts/model-manifest.json`. Die vollständigen Dateinamen werden vor dem Download angezeigt.
 
 Die Systemprompts und Lizenzen werden zusätzlich nach `web/heretic_prompts/` kopiert, damit der vorhandene Web-Dockerfile sie beim Build übernehmen kann. `prompt-enhancer/models.ini`, Workflows und Anwendungscode werden aus dem vorhandenen Checkout verwendet. Das Setup prüft, dass ihre Modellpfade zum Manifest passen.
 
@@ -117,6 +129,8 @@ Für eine neue, leere Installation reicht nach der Vorbereitung der Compose-Star
 Benutzer und Anwendungseinstellungen liegen teilweise in Datenbanken. Sie werden nicht aus GitHub heruntergeladen. Wenn das Setup vorhandene Generator-Daten oder ein vorhandenes Archiv-Datenbank-Volume erkennt, aber ein neues Datenbank-/Admin-Passwort erzeugen müsste, bricht es ab und fordert die ursprüngliche `.env`. Bestehende Daten werden vom Setup nicht gelöscht.
 
 ## Geprüft
+
+Die v23-Integration ergänzt automatisierte Prüfungen für beide NSFW-Modellversionen, Website/API, echte Discord-Registrierung, Prompt-Erweiterung, Referenzlimits und den optionalen Download. Der GPU-Vergleich läuft mit `scripts/test-rapid-v23.py` auf deinem Server.
 
 - 19 automatisierte Prüfungen für Konfiguration, Erhaltung bestehender Einstellungen, Datenbankschutz, Dateirechte, Prüfsummen, fortsetzbare Downloads und Systemprompts.
 - Bash-Syntax und Offline-Prüfung gegen den aktuell geprüften Repository-Stand.

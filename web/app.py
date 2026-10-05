@@ -25,7 +25,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from PIL import Image
 from qwen_quality import configure_workflow, prepare_prompt, validate_options
 # QWEN_RAPID_AIO_V19_INTEGRATION_V1
-from rapid_aio import RAPID_MODEL, build_rapid_workflow, output_dimensions, rapid_controls, validate_generation_model
+from rapid_aio import is_rapid_model, build_rapid_workflow, output_dimensions, rapid_controls, validate_generation_model
 # IMAGE_STUDIO_HERETIC_PE_V1
 from heretic_client import resolve_prompt_expansion, rewrite_prompt, capture_prompt
 from generation_progress import JOBS, ProgressMonitor, comfy_get, progress_markup, install_progress_routes
@@ -207,7 +207,7 @@ def validate_reference_set(mode: str, references: list[ReferenceImage]):
 def validate_selected_model(model, mode, references, rapid_steps, quality="standard"):
     try:
         validate_generation_model(model, mode, len(references), rapid_steps)
-        if model == RAPID_MODEL:
+        if is_rapid_model(model):
             source_size = None
             if references:
                 with Image.open(io.BytesIO(references[0].raw)) as first_image:
@@ -335,14 +335,14 @@ async def render_image(mode: str, prompt: str, references: list[ReferenceImage] 
                 uploaded = await client.post(f"{COMFY_URL}/upload/image", files={"image": (reference.filename, reference.raw, reference.content_type)})
                 uploaded.raise_for_status()
                 uploads.append(uploaded.json())
-            if model == RAPID_MODEL:
+            if is_rapid_model(model):
                 source_size = None
                 if references:
                     with Image.open(io.BytesIO(references[0].raw)) as first_image:
                         source_size = first_image.size
                 enhancer_template = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt) if enhance_prompt else None
                 workflow = build_rapid_workflow(mode, uploads, prompt, quality, seed, rapid_steps,
-                                                source_size, enhancer_template)
+                                                source_size, enhancer_template, model=model)
             else:
                 workflow = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt)
                 workflow = configure_workflow(workflow, prompt, quality, enhance_prompt, seed)

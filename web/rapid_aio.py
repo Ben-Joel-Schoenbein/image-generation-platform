@@ -1,21 +1,30 @@
-"""Qwen Rapid AIO v19 routing shared by the website and Discord API."""
+"""Qwen Rapid AIO routing shared by the website and Discord API."""
 import copy
 import math
 import secrets
+import json
 
 MODEL_FILE = "Qwen-Rapid-AIO-NSFW-v19.safetensors"
 RAPID_MODEL = "rapid_aio_v19"
-MODEL_LIMITS = {"qwen21": 10, RAPID_MODEL: 4}
+RAPID_MODELS = {
+    "rapid_aio_v19": "Qwen-Rapid-AIO-NSFW-v19.safetensors",
+    "rapid_aio_v23_nsfw": "Qwen-Rapid-AIO-NSFW-v23.safetensors",
+}
+MODEL_LIMITS = {"qwen21": 10, **{model: 4 for model in RAPID_MODELS}}
+
+
+def is_rapid_model(model):
+    return model in RAPID_MODELS
 
 
 def validate_generation_model(model, mode, reference_count, rapid_steps=4):
     if model not in MODEL_LIMITS:
-        raise ValueError("Choose Qwen Image 2.1 or Qwen Rapid AIO v19")
-    if model == RAPID_MODEL:
+        raise ValueError("Choose a supported Qwen Image 2.1 or Rapid AIO model")
+    if is_rapid_model(model):
         if isinstance(rapid_steps, bool) or not isinstance(rapid_steps, int) or rapid_steps not in {4, 6, 8}:
             raise ValueError("Rapid AIO supports 4, 6 or 8 sampling steps")
         if reference_count > 4:
-            raise ValueError("Qwen Rapid AIO v19 supports at most 4 reference images; choose Qwen Image 2.1 for up to 10")
+            raise ValueError("Qwen Rapid AIO supports at most 4 reference images; choose Qwen Image 2.1 for up to 10")
     if mode not in {"text", "edit"}:
         raise ValueError("Invalid generation mode")
 
@@ -38,8 +47,10 @@ def output_dimensions(quality, source_size=None):
 
 
 def build_rapid_workflow(mode, uploads, prompt, quality="standard", seed=None,
-                         rapid_steps=4, source_size=None, enhancer_template=None):
-    validate_generation_model(RAPID_MODEL, mode, len(uploads), rapid_steps)
+                         rapid_steps=4, source_size=None, enhancer_template=None, model=RAPID_MODEL):
+    validate_generation_model(model, mode, len(uploads), rapid_steps)
+    if not is_rapid_model(model):
+        raise ValueError("Choose a Rapid AIO checkpoint for this workflow")
     if mode == "edit" and not uploads:
         raise ValueError("Upload at least one reference image for edit mode")
     if mode == "text" and uploads:
@@ -50,7 +61,7 @@ def build_rapid_workflow(mode, uploads, prompt, quality="standard", seed=None,
         raise ValueError("Seed must be between 0 and 4294967295")
     width, height = output_dimensions(quality, source_size)
     graph = {
-        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": MODEL_FILE}},
+        "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": RAPID_MODELS[model]}},
         "2": {"class_type": "EmptySD3LatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
         "3": {"class_type": "StudioRapidAIOTextEncode", "inputs": {"clip": ["1", 1], "vae": ["1", 2],
                   "latent": ["2", 0], "prompt": prompt}},
@@ -59,7 +70,7 @@ def build_rapid_workflow(mode, uploads, prompt, quality="standard", seed=None,
                   "latent_image": ["2", 0], "seed": seed, "steps": rapid_steps, "cfg": 1.0,
                   "sampler_name": "euler_ancestral", "scheduler": "beta", "denoise": 1.0}},
         "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
-        "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": "studio-rapid-aio-v19"}},
+        "7": {"class_type": "SaveImage", "inputs": {"images": ["6", 0], "filename_prefix": "studio-" + model.replace("_", "-")}},
     }
     for index, upload in enumerate(uploads, 1):
         name = upload.get("name", "")
@@ -102,12 +113,14 @@ def build_rapid_workflow(mode, uploads, prompt, quality="standard", seed=None,
 def rapid_controls():
     return '''<label>Model<select name="model" id="generation-model">
 <option value="qwen21">Qwen Image 2.1</option>
-<option value="rapid_aio_v19">Qwen Rapid AIO v19 — NSFW</option></select></label>
+<option value="rapid_aio_v19">Qwen Rapid AIO v19 — NSFW</option>
+<option value="rapid_aio_v23_nsfw">Qwen Rapid AIO v23 — NSFW</option></select></label>
 <label id="rapid-steps-label" hidden>Sampling steps<select name="rapid_steps" id="rapid-steps" disabled>
 <option value="4">4 — fast</option><option value="6">6</option><option value="8">8 — more detail</option></select></label>
 <p id="rapid-model-help" class="muted" hidden>Rapid AIO accepts up to 4 reference images. Output follows Image 1's aspect ratio. Expand description is optional and can take several minutes.</p>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+  const rapidModels = __RAPID_MODELS__;
   const form = document.getElementById('generation-form');
   if (!form) return;
   const model = form.elements.model, picker = form.elements.references;
@@ -120,13 +133,13 @@ document.addEventListener('DOMContentLoaded', () => {
   let previous = model.value;
   const preferences = {qwen21: readEnhancer(), rapid_aio_v19: enhancer.tagName === 'SELECT' ? 'off' : false};
   const check = () => {
-    const limit = model.value === 'rapid_aio_v19' ? 4 : 10;
+    const limit = rapidModels.includes(model.value) ? 4 : 10;
     picker.setCustomValidity(picker.files.length > limit ? `Choose at most ${limit} reference images for this model` : '');
     const label = picker.closest('label');
     if (label && label.firstChild.nodeType === 3) label.firstChild.textContent = `Reference images (1–${limit} for edit mode)`;
   };
   const update = () => {
-    const rapid = model.value === 'rapid_aio_v19';
+    const rapid = rapidModels.includes(model.value);
     steps.disabled = !rapid; stepLabel.hidden = !rapid; help.hidden = !rapid;
     check();
   };
@@ -138,4 +151,4 @@ document.addEventListener('DOMContentLoaded', () => {
   picker.addEventListener('change', check);
   update();
 });
-</script>'''
+</script>'''.replace('__RAPID_MODELS__', json.dumps(list(RAPID_MODELS)))

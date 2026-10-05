@@ -61,9 +61,25 @@ def load_manifest():
             raise ValueError("Invalid model destination")
         seen.add(item["destination"])
         if not isinstance(item.get("size"), int) or item["size"] <= 0: raise ValueError("Invalid model size")
+        if not isinstance(item.get("optional", False), bool): raise ValueError("Invalid optional model flag")
+        if item.get("optional") and item.get("model") != "rapid_aio_v23_nsfw":
+            raise ValueError("Unknown optional model")
         if not (re.fullmatch(r"[a-f0-9]{64}", item.get("sha256", "")) or re.fullmatch(r"[a-f0-9]{40}", item.get("git_blob", ""))):
             raise ValueError("Missing model checksum")
     return manifest
+
+
+def selected_manifest(manifest, include_rapid_v23=False):
+    """The existing installation stays unchanged unless v23 is requested."""
+    return {**manifest, "files": [item for item in manifest["files"]
+            if not item.get("optional", False) or include_rapid_v23]}
+
+
+def rapid_v23_manifest(manifest):
+    files = [item for item in manifest["files"] if item.get("model") == "rapid_aio_v23_nsfw"]
+    if len(files) != 1:
+        raise ValueError("Rapid AIO v23 NSFW is missing from the setup manifest")
+    return {**manifest, "files": files}
 
 
 def project_check(root, manifest):
@@ -81,6 +97,13 @@ def project_check(root, manifest):
     source = ast.parse((root / "web/rapid_aio.py").read_text())
     model = next((node.value.value for node in source.body if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) and any(isinstance(t, ast.Name) and t.id == "MODEL_FILE" for t in node.targets)), None)
     if "models/checkpoints/" + str(model) not in known: raise ValueError("Rapid checkpoint differs from the setup manifest")
+    variants = next((ast.literal_eval(node.value) for node in source.body
+                     if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "RAPID_MODELS" for t in node.targets)), None)
+    if not isinstance(variants, dict) or not variants:
+        raise ValueError("Rapid checkpoint variants are missing")
+    for filename in variants.values():
+        if "models/checkpoints/" + filename not in known:
+            raise ValueError("Rapid checkpoint variant differs from the setup manifest: " + filename)
     preset = configparser.ConfigParser(interpolation=None)
     preset.read_string("[global]\n" + (root/"prompt-enhancer/models.ini").read_text())
     for kind in ["pe-t2i", "pe-i2i"]:
@@ -327,11 +350,15 @@ def main():
     parser.add_argument("--non-interactive", action="store_true")
     parser.add_argument("--check", action="store_true", help="Offline project/model plan only; no writes or downloads")
     parser.add_argument("--no-build", action="store_true")
+    parser.add_argument("--rapid-v23", action="store_true", help="Also download Rapid AIO v23 NSFW (28.4 GB)")
     args = parser.parse_args()
     root = args.project.expanduser().resolve()
     manifest = load_manifest()
     project_check(root, manifest)
+    manifest = selected_manifest(manifest, args.rapid_v23)
     print(f"Aktueller Modellbedarf: {len(manifest['files'])} Dateien, {sum(item['size'] for item in manifest['files'])/1e9:.1f} GB.", flush=True)
+    if not args.rapid_v23:
+        print("Rapid AIO v23 NSFW ist optional: --rapid-v23 oder python3 scripts/download-rapid-v23.py")
     if args.check:
         for item in manifest["files"]:
             state = "vorhanden (Prüfsumme wird beim Setup geprüft)" if (root/item["destination"]).exists() else "fehlt"

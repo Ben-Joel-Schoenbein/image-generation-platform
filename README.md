@@ -4,7 +4,7 @@ Self-hosted image generation and image cataloguing for a small friend group. It 
 
 ## What this starter includes
 
-- Text-to-image and image-to-image forms in the website, using Qwen-Image-2.1 or Rapid AIO v19.
+- Text-to-image and image-to-image forms in the website, using Qwen-Image-2.1, Rapid AIO v19 NSFW, or Rapid AIO v23 NSFW.
 - Prompt expansion with the existing Qwen PE workflows or the Heretic prompt-enhancer service.
 - Select and delete individual images in the generator gallery and the image library.
 - Admin-created friend accounts; generated images are private to each account.
@@ -38,7 +38,7 @@ Install [Docker Engine for Ubuntu](https://docs.docker.com/engine/install/ubuntu
 
 ## First start: automated setup
 
-The setup uses these three files together: `scripts/setup.sh`, `scripts/setup.py`, and `scripts/model-manifest.json`. If they are not yet in your checkout, copy them from the supplied `image-studio-setup.zip` into the repository's `scripts/` directory first.
+The setup is tracked in the repository: `scripts/setup.sh`, `scripts/setup.py`, and `scripts/model-manifest.json`. The optional v23 downloader is `scripts/download-rapid-v23.py`.
 
 Prepare the host before running the setup:
 
@@ -131,15 +131,49 @@ Both `workflows/text2img.api.json` and `workflows/img2img.api.json` use Qwen-Ima
 | --- | --- |
 | Qwen-Image-2.1 image generation/editing | `qwen_image_2.1_bf16.safetensors`, `qwen3vl_8b_bf16.safetensors`, `qwen_image_2.1_vae_bf16.safetensors` |
 | Regular Qwen prompt expansion | `qwen3.5_9b_qwen_image_2.1_pe_t2i.int8_convrot.safetensors`, `qwen3.5_9b_qwen_image_2.1_pe_i2i.int8_convrot.safetensors` |
-| Rapid AIO | `Qwen-Rapid-AIO-NSFW-v19.safetensors` |
+| Rapid AIO v19 NSFW | `Qwen-Rapid-AIO-NSFW-v19.safetensors` |
+| Optional Rapid AIO v23 NSFW (`--rapid-v23`) | `Qwen-Rapid-AIO-NSFW-v23.safetensors` (+28.4 GB) |
 | Heretic text prompt expansion | `pe_t2i_heretic-Q4_K_M.gguf`, `system_prompt.txt`, `LICENSE` |
 | Heretic reference-image prompt expansion | `pe_i2i_heretic-Q4_K_M.gguf`, `pe_i2i_heretic.mmproj-bf16.gguf`, `system_prompt.txt`, `LICENSE` |
 
 The manifest pins exact Hugging Face revisions and file checksums. For this setup, use `bash scripts/setup.sh`; the older `scripts/download-sdxl.sh` and `qwen-edit-setup/download-models.sh` target earlier workflows.
 
-Edit mode accepts up to ten reference images. Mention “Image 1”, “Image 2”, etc. in the prompt. More references share the available reference resolution, so evaluate the result with your inputs. Standard upload limits are 15 MB per image and 60 MB total.
+Qwen Image 2.1 accepts up to ten reference images; Rapid AIO v19/v23 accepts up to four. Mention “Image 1”, “Image 2”, etc. in the prompt. More references share the available reference resolution, so evaluate the result with your inputs. Standard upload limits are 15 MB per image and 60 MB total.
 
 To use another workflow filename, edit `WORKFLOW_TEXT` or `WORKFLOW_EDIT` in `compose.yaml` and mount that file from `./workflows`. If you change model filenames, update the setup manifest too; it rejects workflow models that it does not cover.
+
+## Rapid AIO v23 NSFW
+
+v23 NSFW is an additional choice in the website and both Discord commands; v19 remains available. The AIO checkpoint includes its text encoder and VAE. The generator uses CFG 1, `euler_ancestral`, and `beta`; start with 4 steps and 1K quality. Prompt expansion defaults to Off for both Rapid versions, with Standard and Heretic available explicitly.
+
+For an existing installation, download only the new model and rebuild the application services:
+
+```bash
+python3 scripts/download-rapid-v23.py
+bash studio-compose.sh up -d --build web discord
+```
+
+The downloader resumes interrupted downloads and verifies the pinned SHA-256. Allow 28.4 GB for the checkpoint; its free-space check keeps another 20 GiB as reserve. No SFW checkpoint is downloaded. A missing checkpoint is reported with its exact installation path when generating.
+
+For a new server, include v23 in the normal setup:
+
+```bash
+bash scripts/setup.sh --rapid-v23
+sudo docker compose up -d
+```
+
+This installs about 121 GB of models in total. Without `--rapid-v23`, the existing 93 GB setup is retained. `--check` works with both download scripts without writing or downloading.
+
+Test through the normal background job API, using the same prompt, seed, steps, and quality for v19 and v23:
+
+```bash
+bash studio-compose.sh exec -T web python - --compare-v19 < scripts/test-rapid-v23.py
+bash studio-compose.sh cp web:/data/rapid-v23-tests ~/rapid-v23-tests
+```
+
+The script saves comparison images, elapsed times, and settings. Add `--reference /data/images/USER/IMAGE.png` for edit mode (a path inside the web container), or `--prompt-expansion heretic` / `standard` to test rewriting. Use `--prompt "your description"`, `--steps 6`, and `--seed 12345` to choose test inputs. Detailed steps are in [docs/rapid-v23.md](docs/rapid-v23.md).
+
+In Discord select **Qwen Rapid AIO v23 — NSFW** via `model`. Restarting the bot synchronizes the choices; reload Discord with Ctrl+R and start a fresh command if the previous choices persist. The author suggests v23 may follow prompts better, while v19 can be more consistent for editing; compare your own references before changing your preferred version. See the [author's model card](https://huggingface.co/Phr00t/Qwen-Image-Edit-Rapid-AIO).
 
 ## Optional Discord bot
 

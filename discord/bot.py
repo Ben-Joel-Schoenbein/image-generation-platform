@@ -19,6 +19,12 @@ API_SECRET = os.getenv("DISCORD_BOT_SECRET", "")
 MAX_UPLOAD = int(os.getenv("MAX_UPLOAD_MB", "15")) * 1024 * 1024
 MAX_TOTAL_UPLOAD = int(os.getenv("MAX_REFERENCE_TOTAL_MB", "60")) * 1024 * 1024
 MAX_REFERENCES = 10
+RAPID_MODELS = {"rapid_aio_v19", "rapid_aio_v23_nsfw"}
+MODEL_CHOICES = [
+    app_commands.Choice(name="Qwen Image 2.1", value="qwen21"),
+    app_commands.Choice(name="Qwen Rapid AIO v19 — NSFW", value="rapid_aio_v19"),
+    app_commands.Choice(name="Qwen Rapid AIO v23 — NSFW", value="rapid_aio_v23_nsfw"),
+]
 if not TOKEN or not API_SECRET:
     raise RuntimeError("Set the bot token and API secret")
 
@@ -74,10 +80,10 @@ async def generate(interaction: discord.Interaction, mode: str, prompt: str, ref
         await interaction.response.send_message("Attach a reference image for `/edit`.", ephemeral=True)
         return
     model = options.get("model", "qwen21")
-    if model not in {"qwen21", "rapid_aio_v19"}:
+    if model not in {"qwen21", *RAPID_MODELS}:
         await interaction.response.send_message("Choose a supported image model.", ephemeral=True)
         return
-    reference_limit = 4 if model == "rapid_aio_v19" else MAX_REFERENCES
+    reference_limit = 4 if model in RAPID_MODELS else MAX_REFERENCES
     if len(references) > reference_limit:
         await interaction.response.send_message(f"Use at most {reference_limit} reference images for this model.", ephemeral=True)
         return
@@ -115,7 +121,7 @@ async def generate(interaction: discord.Interaction, mode: str, prompt: str, ref
 @app_commands.describe(prompt_expansion="Prompt expansion: Auto follows model defaults or enhance_prompt")
 @app_commands.choices(prompt_expansion=[app_commands.Choice(name="Auto", value="auto"), app_commands.Choice(name="Off", value="off"), app_commands.Choice(name="Standard", value="standard"), app_commands.Choice(name="Heretic", value="heretic")])
 @app_commands.describe(model="Image model: Rapid AIO accepts up to 4 references; Qwen 2.1 accepts 10", rapid_steps="Rapid AIO sampling steps")
-@app_commands.choices(model=[app_commands.Choice(name="Qwen Image 2.1", value="qwen21"), app_commands.Choice(name="Qwen Rapid AIO v19 — NSFW", value="rapid_aio_v19")], rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
+@app_commands.choices(model=MODEL_CHOICES, rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
 @app_commands.choices(quality=[app_commands.Choice(name="Standard (1K)", value="standard"), app_commands.Choice(name="High (2K)", value="high")])
 async def imagine(interaction: discord.Interaction, prompt: str, quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, prompt_expansion: str = "auto"):
     await generate(interaction, "text", prompt, [], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, model=model, rapid_steps=rapid_steps, prompt_expansion=prompt_expansion)
@@ -131,7 +137,7 @@ async def imagine(interaction: discord.Interaction, prompt: str, quality: str = 
 @app_commands.describe(prompt_expansion="Prompt expansion: Auto follows model defaults or enhance_prompt")
 @app_commands.choices(prompt_expansion=[app_commands.Choice(name="Auto", value="auto"), app_commands.Choice(name="Off", value="off"), app_commands.Choice(name="Standard", value="standard"), app_commands.Choice(name="Heretic", value="heretic")])
 @app_commands.describe(model="Image model: Rapid AIO accepts up to 4 references; Qwen 2.1 accepts 10", rapid_steps="Rapid AIO sampling steps")
-@app_commands.choices(model=[app_commands.Choice(name="Qwen Image 2.1", value="qwen21"), app_commands.Choice(name="Qwen Rapid AIO v19 — NSFW", value="rapid_aio_v19")], rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
+@app_commands.choices(model=MODEL_CHOICES, rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
 @app_commands.choices(quality=[app_commands.Choice(name="Standard (1K)", value="standard"), app_commands.Choice(name="High (2K)", value="high")])
 async def edit(interaction: discord.Interaction, prompt: str, reference: discord.Attachment,
                reference2: discord.Attachment | None = None, reference3: discord.Attachment | None = None,

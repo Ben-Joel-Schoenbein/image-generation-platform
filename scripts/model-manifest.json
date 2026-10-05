@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "project_commit": "0375cd890b9fa72ca72cc267c4708f23b478fc09",
+  "project_commit": "6405bcad89b4b337224c62196871621d9b2cf3fb",
   "files": [
     {
       "repo": "Comfy-Org/Qwen-Image-2.1",
@@ -105,6 +105,16 @@
       "destination": "models/prompt_enhancers/i2i/system_prompt.txt",
       "size": 18344,
       "git_blob": "424fcfbe2968973c57fe67e3d629df1b0a1e1550"
+    },
+    {
+      "repo": "Phr00t/Qwen-Image-Edit-Rapid-AIO",
+      "revision": "691024f438640508f8aa86414863fc15edfb8a84",
+      "file": "v23/Qwen-Rapid-AIO-NSFW-v23.safetensors",
+      "destination": "models/checkpoints/Qwen-Rapid-AIO-NSFW-v23.safetensors",
+      "size": 28431840023,
+      "sha256": "fdb919fc81bea63f13759967fc92c9118142e5c70d4e6795199233a35eefa233",
+      "optional": true,
+      "model": "rapid_aio_v23_nsfw"
     }
   ]
 }
