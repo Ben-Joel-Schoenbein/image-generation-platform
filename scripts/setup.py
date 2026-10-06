@@ -62,20 +62,29 @@ def load_manifest():
         seen.add(item["destination"])
         if not isinstance(item.get("size"), int) or item["size"] <= 0: raise ValueError("Invalid model size")
         if not isinstance(item.get("optional", False), bool): raise ValueError("Invalid optional model flag")
-        if item.get("optional") and item.get("model") not in {"rapid_aio_v23_nsfw", "qwen_edit_2511_fp8", "qwen_edit_2511_bf16", "qwen_edit_2511_shared"}:
+        if item.get("optional") and item.get("model") not in {"rapid_aio_v23_nsfw", "qwen_edit_2511_fp8", "qwen_edit_2511_bf16", "qwen_edit_2511_shared", "qwen21_int8_encoder"}:
             raise ValueError("Unknown optional model")
         if not (re.fullmatch(r"[a-f0-9]{64}", item.get("sha256", "")) or re.fullmatch(r"[a-f0-9]{40}", item.get("git_blob", ""))):
             raise ValueError("Missing model checksum")
     return manifest
 
 
-def selected_manifest(manifest, include_rapid_v23=False, qwen_edit_2511=None):
+def selected_manifest(manifest, include_rapid_v23=False, qwen_edit_2511=None, qwen21_int8_encoder=False):
     """Extra models are downloaded only for explicitly selected profiles."""
     wanted = {"rapid_aio_v23_nsfw"} if include_rapid_v23 else set()
     if qwen_edit_2511 is not None:
         wanted.update(item["model"] for item in qwen_edit_manifest(manifest, qwen_edit_2511)["files"])
+    if qwen21_int8_encoder:
+        wanted.update(item["model"] for item in qwen21_encoder_manifest(manifest)["files"])
     return {**manifest, "files": [item for item in manifest["files"]
             if not item.get("optional", False) or item.get("model") in wanted]}
+
+
+def qwen21_encoder_manifest(manifest):
+    files = [item for item in manifest["files"] if item.get("model") == "qwen21_int8_encoder"]
+    if len(files) != 1 or files[0]["destination"] != "models/text_encoders/qwen3vl_8b_int8_convrot.safetensors":
+        raise ValueError("Qwen 2.1 INT8 ConvRot encoder is missing from the setup manifest")
+    return {**manifest, "files": files}
 
 
 def qwen_edit_manifest(manifest, precision="both"):
@@ -97,7 +106,7 @@ def rapid_v23_manifest(manifest):
 
 
 def project_check(root, manifest):
-    required = ["compose.yaml", ".env.example", "compose.heretic.yaml", "prompt-enhancer/models.ini", "web/heretic_client.py", "web/rapid_aio.py", "web/lora_support.py", "web/lora_defaults.json", "web/Dockerfile", "comfyui/Dockerfile"]
+    required = ["compose.yaml", ".env.example", "compose.heretic.yaml", "prompt-enhancer/models.ini", "web/heretic_client.py", "web/rapid_aio.py", "web/qwen_quality.py", "web/lora_support.py", "web/lora_defaults.json", "web/Dockerfile", "comfyui/Dockerfile"]
     for name in required:
         if not safe_path(root, name).is_file(): raise ValueError("Required current repository file missing: " + name)
     known = {item["destination"] for item in manifest["files"]}
@@ -130,6 +139,14 @@ def project_check(root, manifest):
     for key, folder in (("EDIT2511_TEXT_ENCODER", "text_encoders"), ("EDIT2511_VAE", "vae")):
         if "models/" + folder + "/" + str(constants.get(key)) not in known:
             raise ValueError("Edit 2511 dependency differs from the setup manifest: " + key)
+    quality_source = ast.parse((root / "web/qwen_quality.py").read_text())
+    encoders = next((ast.literal_eval(node.value) for node in quality_source.body
+                     if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "QWEN21_TEXT_ENCODERS" for t in node.targets)), None)
+    if not isinstance(encoders, dict) or set(encoders) != {"bf16", "int8_convrot"}:
+        raise ValueError("Qwen 2.1 encoder variants are missing")
+    for filename in encoders.values():
+        if "models/text_encoders/" + filename not in known:
+            raise ValueError("Qwen 2.1 encoder differs from the setup manifest: " + filename)
     preset = configparser.ConfigParser(interpolation=None)
     preset.read_string("[global]\n" + (root/"prompt-enhancer/models.ini").read_text())
     for kind in ["pe-t2i", "pe-i2i"]:
@@ -378,11 +395,12 @@ def main():
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--rapid-v23", action="store_true", help="Also download Rapid AIO v23 NSFW (28.4 GB)")
     parser.add_argument("--qwen-edit-2511", choices=("fp8", "bf16", "both"), help="Also download Edit 2511 and its encoder/VAE")
+    parser.add_argument("--qwen21-int8-encoder", action="store_true", help="Also download the Qwen 2.1 INT8 ConvRot text encoder (11 GB)")
     args = parser.parse_args()
     root = args.project.expanduser().resolve()
     manifest = load_manifest()
     project_check(root, manifest)
-    manifest = selected_manifest(manifest, args.rapid_v23, args.qwen_edit_2511)
+    manifest = selected_manifest(manifest, args.rapid_v23, args.qwen_edit_2511, args.qwen21_int8_encoder)
     print(f"Aktueller Modellbedarf: {len(manifest['files'])} Dateien, {sum(item['size'] for item in manifest['files'])/1e9:.1f} GB.", flush=True)
     if not args.rapid_v23:
         print("Rapid AIO v23 NSFW ist optional: --rapid-v23 oder python3 scripts/download-rapid-v23.py")

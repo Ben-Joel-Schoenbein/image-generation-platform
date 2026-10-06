@@ -86,6 +86,9 @@ async def generate(interaction: discord.Interaction, mode: str, prompt: str, ref
     if model not in {"qwen21", *RAPID_MODELS, *EDIT2511_MODELS}:
         await interaction.response.send_message("Choose a supported image model.", ephemeral=True)
         return
+    if model != "qwen21" and (options.get("qwen_sampler", "default") != "default" or options.get("qwen_scheduler", "default") != "default" or options.get("qwen_text_encoder", "bf16") != "bf16"):
+        await interaction.response.send_message("Sampler, scheduler and text encoder options apply only to Qwen Image 2.1.", ephemeral=True)
+        return
     reference_limit = 3 if model in EDIT2511_MODELS else 4 if model in RAPID_MODELS else MAX_REFERENCES
     if len(references) > reference_limit:
         await interaction.response.send_message(f"Use at most {reference_limit} reference images for this model.", ephemeral=True)
@@ -126,9 +129,11 @@ async def generate(interaction: discord.Interaction, mode: str, prompt: str, ref
 @app_commands.describe(model="Qwen 2.1: 10 references; Rapid AIO: 4; Edit 2511: 3", rapid_steps="Rapid AIO sampling steps", edit_steps="Edit 2511 sampling steps (20, 30 or 40)")
 @app_commands.choices(edit_steps=[app_commands.Choice(name="20 — fast", value=20), app_commands.Choice(name="30", value=30), app_commands.Choice(name="40 — recommended", value=40)])
 @app_commands.choices(model=MODEL_CHOICES, rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
+@app_commands.describe(qwen_sampler="Qwen 2.1 only: sampler", qwen_scheduler="Qwen 2.1 only: scheduler", qwen_text_encoder="Qwen 2.1 only: encoder; INT8 requires the extra download")
+@app_commands.choices(qwen_sampler=[app_commands.Choice(name="Default — from workflow", value="default"), app_commands.Choice(name="Euler", value="euler"), app_commands.Choice(name="ER-SDE", value="er_sde")], qwen_scheduler=[app_commands.Choice(name="Default — from workflow", value="default"), app_commands.Choice(name="Simple", value="simple"), app_commands.Choice(name="Beta", value="beta")], qwen_text_encoder=[app_commands.Choice(name="Qwen3-VL 8B — BF16", value="bf16"), app_commands.Choice(name="Qwen3-VL 8B — INT8 ConvRot", value="int8_convrot")])
 @app_commands.choices(quality=[app_commands.Choice(name="Standard (1K)", value="standard"), app_commands.Choice(name="High (2K)", value="high")])
-async def imagine(interaction: discord.Interaction, prompt: str, quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto"):
-    await generate(interaction, "text", prompt, [], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion)
+async def imagine(interaction: discord.Interaction, prompt: str, quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto", qwen_sampler: str = "default", qwen_scheduler: str = "default", qwen_text_encoder: str = "bf16"):
+    await generate(interaction, "text", prompt, [], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion, qwen_sampler=qwen_sampler, qwen_scheduler=qwen_scheduler, qwen_text_encoder=qwen_text_encoder)
 
 
 @bot.tree.command(name="edit", description="Create or edit an image using up to 10 reference images")
@@ -143,6 +148,8 @@ async def imagine(interaction: discord.Interaction, prompt: str, quality: str = 
 @app_commands.describe(model="Qwen 2.1: 10 references; Rapid AIO: 4; Edit 2511: 3", rapid_steps="Rapid AIO sampling steps", edit_steps="Edit 2511 sampling steps (20, 30 or 40)")
 @app_commands.choices(edit_steps=[app_commands.Choice(name="20 — fast", value=20), app_commands.Choice(name="30", value=30), app_commands.Choice(name="40 — recommended", value=40)])
 @app_commands.choices(model=MODEL_CHOICES, rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
+@app_commands.describe(qwen_sampler="Qwen 2.1 only: sampler", qwen_scheduler="Qwen 2.1 only: scheduler", qwen_text_encoder="Qwen 2.1 only: encoder; INT8 requires the extra download")
+@app_commands.choices(qwen_sampler=[app_commands.Choice(name="Default — from workflow", value="default"), app_commands.Choice(name="Euler", value="euler"), app_commands.Choice(name="ER-SDE", value="er_sde")], qwen_scheduler=[app_commands.Choice(name="Default — from workflow", value="default"), app_commands.Choice(name="Simple", value="simple"), app_commands.Choice(name="Beta", value="beta")], qwen_text_encoder=[app_commands.Choice(name="Qwen3-VL 8B — BF16", value="bf16"), app_commands.Choice(name="Qwen3-VL 8B — INT8 ConvRot", value="int8_convrot")])
 @app_commands.choices(quality=[app_commands.Choice(name="Standard (1K)", value="standard"), app_commands.Choice(name="High (2K)", value="high")])
 async def edit(interaction: discord.Interaction, prompt: str, reference: discord.Attachment,
                reference2: discord.Attachment | None = None, reference3: discord.Attachment | None = None,
@@ -150,10 +157,10 @@ async def edit(interaction: discord.Interaction, prompt: str, reference: discord
                reference6: discord.Attachment | None = None, reference7: discord.Attachment | None = None,
                reference8: discord.Attachment | None = None, reference9: discord.Attachment | None = None,
                reference10: discord.Attachment | None = None, recreate: bool = False,
-               quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto"):
+               quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto", qwen_sampler: str = "default", qwen_scheduler: str = "default", qwen_text_encoder: str = "bf16"):
     await generate(interaction, "edit", prompt, [image for image in
         (reference, reference2, reference3, reference4, reference5, reference6, reference7, reference8, reference9, reference10)
-        if image is not None], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, edit_intent="recreate" if recreate else "edit", model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion)
+        if image is not None], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, edit_intent="recreate" if recreate else "edit", model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion, qwen_sampler=qwen_sampler, qwen_scheduler=qwen_scheduler, qwen_text_encoder=qwen_text_encoder)
 
 
 @bot.tree.command(name="loras", description="Show detected LoRAs, selected models and configured strengths")

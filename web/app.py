@@ -23,7 +23,7 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from pydantic import BaseModel, Field
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from PIL import Image
-from qwen_quality import configure_workflow, prepare_prompt, validate_options
+from qwen_quality import qwen21_controls, validate_qwen21_selection, configure_workflow, prepare_prompt, validate_options
 # QWEN_RAPID_AIO_V19_INTEGRATION_V1
 from rapid_aio import is_rapid_model, is_edit2511_model, is_qwen_edit_model, build_rapid_workflow, build_edit2511_workflow, output_dimensions, rapid_controls, validate_generation_model
 from lora_support import CONFIG_KEY as LORA_CONFIG_KEY, parse_config as parse_lora_config, read_config as read_lora_config, selected_loras, apply_loras, install_lora_routes
@@ -206,9 +206,10 @@ def validate_reference_set(mode: str, references: list[ReferenceImage]):
         raise ReferenceError(f"Reference images together must be at most {MAX_REFERENCE_TOTAL_MB} MB", 413)
 
 
-def validate_selected_model(model, mode, references, rapid_steps, quality="standard", edit_steps=40):
+def validate_selected_model(model, mode, references, rapid_steps, quality="standard", edit_steps=40, qwen_sampler="default", qwen_scheduler="default", qwen_text_encoder="bf16"):
     try:
         validate_generation_model(model, mode, len(references), rapid_steps, edit_steps)
+        validate_qwen21_selection(model, qwen_sampler, qwen_scheduler, qwen_text_encoder)
         if is_qwen_edit_model(model):
             source_size = None
             if references:
@@ -305,7 +306,7 @@ def comfy_error(response: httpx.Response) -> str:
 
 
 async def render_image(mode: str, prompt: str, references: list[ReferenceImage] | None = None, *,
-                       quality: str = "standard", edit_intent: str = "edit", enhance_prompt: bool | None = None, seed: int | None = None, progress=None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto") -> bytes:
+                       quality: str = "standard", edit_intent: str = "edit", enhance_prompt: bool | None = None, seed: int | None = None, progress=None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto", qwen_sampler: str = "default", qwen_scheduler: str = "default", qwen_text_encoder: str = "bf16") -> bytes:
     references = references or []
     selection = resolve_prompt_expansion(prompt_expansion, enhance_prompt, model)
     enhance_prompt = selection == 'standard'
@@ -314,6 +315,7 @@ async def render_image(mode: str, prompt: str, references: list[ReferenceImage] 
     try:
         validate_options(quality, edit_intent, seed)
         validate_generation_model(model, mode, len(references), rapid_steps, edit_steps)
+        validate_qwen21_selection(model, qwen_sampler, qwen_scheduler, qwen_text_encoder)
     except ValueError as exc:
         raise ReferenceError(str(exc)) from exc
     prompt = prepare_prompt(mode, prompt, edit_intent)
@@ -356,7 +358,7 @@ async def render_image(mode: str, prompt: str, references: list[ReferenceImage] 
                                    source_size, enhancer_template, model=model, loras=loras)
             else:
                 workflow = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt)
-                workflow = configure_workflow(workflow, prompt, quality, enhance_prompt, seed)
+                workflow = configure_workflow(workflow, prompt, quality, enhance_prompt, seed, qwen_sampler=qwen_sampler, qwen_scheduler=qwen_scheduler, qwen_text_encoder=qwen_text_encoder)
                 workflow = apply_loras(workflow, loras, model_node="4")
             if selection == 'standard':
                 capture_prompt(workflow, model)
@@ -485,7 +487,7 @@ async def home(request: Request, notice: str = "", error: str = ""):
     edit_allowed = setting("allow_edit", "true") == "true"
     modes = "".join(f'<option value="{v}">{label}</option>' for v, label, allowed in [("text", "Create from description", text_allowed), ("edit", "Edit using a reference image", edit_allowed)] if allowed)
     blocked = len(json.loads(setting("blocked_terms", "[]")))
-    body = f'''<section class="card"><h2>Generate an image</h2><p class="muted">Prompts are checked against {blocked} admin-defined blocked phrase(s). Max prompt length: {html.escape(setting("max_prompt_chars", str(MAX_PROMPT_CHARS)))} characters.</p>{f'<p class="error">{html.escape(error)}</p>' if error else ''}<form id="generation-form" method="post" action="/generate" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{csrf(request)}"><label>Mode<select name="mode">{modes}</select></label>{rapid_controls()}<label>Reference use<select name="edit_intent"><option value="edit">Edit the reference image</option><option value="recreate">Create a new depiction of referenced subjects</option></select></label><label>Output size<select name="quality"><option value="standard">Standard — about 1K</option><option value="high">High — about 2K (slower)</option></select></label><label>Prompt expansion<select name="prompt_expansion" id="prompt-expansion"><option value="off">Off</option><option value="standard" selected>Standard</option><option value="heretic">Heretic</option></select></label><p class="muted">Heretic uses the text or reference-image rewriter for the selected mode. Expansion adds waiting time. The expanded description appears below.</p><details id="expanded-prompt-panel" hidden><summary>Expanded description</summary><pre id="expanded-prompt-text" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details><label>Seed (optional)<input type="number" name="seed" min="0" max="4294967295" placeholder="Leave empty for a random result"></label><p class="muted">For a new style or pose, choose a new depiction and describe what should stay recognizable. Reference output follows Image 1's aspect ratio; text output is square.</p><label>Description<textarea name="prompt" rows="4" maxlength="{html.escape(setting("max_prompt_chars", str(MAX_PROMPT_CHARS)))}" required placeholder="Describe the image or the change you want"></textarea></label><label>Reference images (1–10 for edit mode)<input id="references" type="file" name="references" accept="image/png,image/jpeg,image/webp" multiple></label><p class="muted">Use “Image 1”, “Image 2”, etc. in your prompt. {MAX_UPLOAD_MB} MB per image, {MAX_REFERENCE_TOTAL_MB} MB total.</p><ol id="reference-list"></ol><script>const picker=document.getElementById("references");picker.addEventListener("change",()=>{{const files=Array.from(picker.files);picker.setCustomValidity(files.length>10?"Choose at most 10 reference images":"");const list=document.getElementById("reference-list");list.replaceChildren();files.forEach((file,index)=>{{const row=document.createElement("li");row.textContent="Image "+(index+1)+": "+file.name;list.appendChild(row);}});}});</script><button id="generation-submit">Generate</button></form>{progress_markup()}</section>'''
+    body = f'''<section class="card"><h2>Generate an image</h2><p class="muted">Prompts are checked against {blocked} admin-defined blocked phrase(s). Max prompt length: {html.escape(setting("max_prompt_chars", str(MAX_PROMPT_CHARS)))} characters.</p>{f'<p class="error">{html.escape(error)}</p>' if error else ''}<form id="generation-form" method="post" action="/generate" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{csrf(request)}"><label>Mode<select name="mode">{modes}</select></label>{rapid_controls()}{qwen21_controls()}<label>Reference use<select name="edit_intent"><option value="edit">Edit the reference image</option><option value="recreate">Create a new depiction of referenced subjects</option></select></label><label>Output size<select name="quality"><option value="standard">Standard — about 1K</option><option value="high">High — about 2K (slower)</option></select></label><label>Prompt expansion<select name="prompt_expansion" id="prompt-expansion"><option value="off">Off</option><option value="standard" selected>Standard</option><option value="heretic">Heretic</option></select></label><p class="muted">Heretic uses the text or reference-image rewriter for the selected mode. Expansion adds waiting time. The expanded description appears below.</p><details id="expanded-prompt-panel" hidden><summary>Expanded description</summary><pre id="expanded-prompt-text" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details><label>Seed (optional)<input type="number" name="seed" min="0" max="4294967295" placeholder="Leave empty for a random result"></label><p class="muted">For a new style or pose, choose a new depiction and describe what should stay recognizable. Reference output follows Image 1's aspect ratio; text output is square.</p><label>Description<textarea name="prompt" rows="4" maxlength="{html.escape(setting("max_prompt_chars", str(MAX_PROMPT_CHARS)))}" required placeholder="Describe the image or the change you want"></textarea></label><label>Reference images (1–10 for edit mode)<input id="references" type="file" name="references" accept="image/png,image/jpeg,image/webp" multiple></label><p class="muted">Use “Image 1”, “Image 2”, etc. in your prompt. {MAX_UPLOAD_MB} MB per image, {MAX_REFERENCE_TOTAL_MB} MB total.</p><ol id="reference-list"></ol><script>const picker=document.getElementById("references");picker.addEventListener("change",()=>{{const files=Array.from(picker.files);picker.setCustomValidity(files.length>10?"Choose at most 10 reference images":"");const list=document.getElementById("reference-list");list.replaceChildren();files.forEach((file,index)=>{{const row=document.createElement("li");row.textContent="Image "+(index+1)+": "+file.name;list.appendChild(row);}});}});</script><button id="generation-submit">Generate</button></form>{progress_markup()}</section>'''
     with db() as conn:
         rows = conn.execute("SELECT id,prompt,created_at FROM generations WHERE user_id=? ORDER BY created_at DESC LIMIT 24", (user["id"],)).fetchall()
     images = "".join(f'<article><a href="/image/{row["id"]}"><img loading="lazy" src="/image/{row["id"]}"></a><small>{html.escape(row["prompt"][:160])}</small></article>' for row in rows)
@@ -500,7 +502,7 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
                                 csrf_token: str = Form(...), generation_job_id: str = Form(...),
                                 references: list[UploadFile] | None = File(None), reference: UploadFile | None = File(None),
                                 quality: str = Form("standard"), edit_intent: str = Form("edit"),
-                                enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4), edit_steps: int = Form(40), prompt_expansion: str = Form("auto")):
+                                enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4), edit_steps: int = Form(40), prompt_expansion: str = Form("auto"), qwen_sampler: str = Form("default"), qwen_scheduler: str = Form("default"), qwen_text_encoder: str = Form("bf16")):
     user = current_user(request)
     if not user:
         return JSONResponse({"error": "Sign in again before generating."}, status_code=401)
@@ -523,12 +525,12 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
             validate_reference_set("edit", images)
         resolve_prompt_expansion(prompt_expansion, enhance_prompt, model)
         validate_reference_set(mode, images)
-        validate_selected_model(model, mode, images, rapid_steps, quality, edit_steps)
+        validate_selected_model(model, mode, images, rapid_steps, quality, edit_steps, qwen_sampler, qwen_scheduler, qwen_text_encoder)
         job, created = JOBS.create(user["id"], generation_job_id)
         if created:
             async def operation(progress):
                 png = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent,
-                                         enhance_prompt=enhance_prompt, seed=seed, progress=progress, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion)
+                                         enhance_prompt=enhance_prompt, seed=seed, progress=progress, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion, qwen_sampler=qwen_sampler, qwen_scheduler=qwen_scheduler, qwen_text_encoder=qwen_text_encoder)
                 progress.update("saving", "Saving to your gallery")
                 image_id = uuid.uuid4().hex
                 user_dir = DATA_DIR / "images" / str(user["id"])
@@ -552,7 +554,7 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
 async def generate(request: Request, mode: str = Form(...), prompt: str = Form(...), csrf_token: str = Form(...),
                    references: list[UploadFile] | None = File(None), reference: UploadFile | None = File(None),
                    quality: str = Form("standard"), edit_intent: str = Form("edit"),
-                   enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4), edit_steps: int = Form(40), prompt_expansion: str = Form("auto")):
+                   enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4), edit_steps: int = Form(40), prompt_expansion: str = Form("auto"), qwen_sampler: str = Form("default"), qwen_scheduler: str = Form("default"), qwen_text_encoder: str = Form("bf16")):
     user = current_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -574,8 +576,8 @@ async def generate(request: Request, mode: str = Form(...), prompt: str = Form(.
             validate_reference_set("edit", images)
         resolve_prompt_expansion(prompt_expansion, enhance_prompt, model)
         validate_reference_set(mode, images)
-        validate_selected_model(model, mode, images, rapid_steps, quality, edit_steps)
-        image_bytes = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent, enhance_prompt=enhance_prompt, seed=seed, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion)
+        validate_selected_model(model, mode, images, rapid_steps, quality, edit_steps, qwen_sampler, qwen_scheduler, qwen_text_encoder)
+        image_bytes = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent, enhance_prompt=enhance_prompt, seed=seed, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion, qwen_sampler=qwen_sampler, qwen_scheduler=qwen_scheduler, qwen_text_encoder=qwen_text_encoder)
         image_id = uuid.uuid4().hex
         user_dir = DATA_DIR / "images" / str(user["id"])
         user_dir.mkdir(parents=True, exist_ok=True)
@@ -612,6 +614,9 @@ class BotGeneration(BaseModel):
     rapid_steps: int = Field(default=4, strict=True)
     edit_steps: int = Field(default=40, strict=True)
     prompt_expansion: str = "auto"
+    qwen_sampler: str = "default"
+    qwen_scheduler: str = "default"
+    qwen_text_encoder: str = "bf16"
 
 
 # IMAGE_STUDIO_PROGRESS_V1_DISCORD_ROUTES
@@ -649,13 +654,13 @@ async def create_discord_job(request: Request, payload: BotGeneration):
             validate_reference_set("edit", images)
         resolve_prompt_expansion(payload.prompt_expansion, payload.enhance_prompt, payload.model)
         validate_reference_set(payload.mode, images)
-        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality, payload.edit_steps)
+        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality, payload.edit_steps, payload.qwen_sampler, payload.qwen_scheduler, payload.qwen_text_encoder)
         job, created = JOBS.create(owner, payload.generation_job_id or uuid.uuid4().hex)
         if created:
             async def operation(progress):
                 png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality,
                                          edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt,
-                                         seed=payload.seed, progress=progress, model=payload.model, rapid_steps=payload.rapid_steps, edit_steps=payload.edit_steps, prompt_expansion=payload.prompt_expansion)
+                                         seed=payload.seed, progress=progress, model=payload.model, rapid_steps=payload.rapid_steps, edit_steps=payload.edit_steps, prompt_expansion=payload.prompt_expansion, qwen_sampler=payload.qwen_sampler, qwen_scheduler=payload.qwen_scheduler, qwen_text_encoder=payload.qwen_text_encoder)
                 progress.update("saving", "Preparing the Discord image")
                 with Image.open(io.BytesIO(png)) as image:
                     out = io.BytesIO()
@@ -716,8 +721,8 @@ async def discord_generate(request: Request, payload: BotGeneration):
             validate_reference_set("edit", images)
         resolve_prompt_expansion(payload.prompt_expansion, payload.enhance_prompt, payload.model)
         validate_reference_set(payload.mode, images)
-        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality, payload.edit_steps)
-        png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality, edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt, seed=payload.seed, model=payload.model, rapid_steps=payload.rapid_steps, edit_steps=payload.edit_steps, prompt_expansion=payload.prompt_expansion)
+        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality, payload.edit_steps, payload.qwen_sampler, payload.qwen_scheduler, payload.qwen_text_encoder)
+        png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality, edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt, seed=payload.seed, model=payload.model, rapid_steps=payload.rapid_steps, edit_steps=payload.edit_steps, prompt_expansion=payload.prompt_expansion, qwen_sampler=payload.qwen_sampler, qwen_scheduler=payload.qwen_scheduler, qwen_text_encoder=payload.qwen_text_encoder)
         with Image.open(io.BytesIO(png)) as image:
             image = image.convert("RGB")
             out = io.BytesIO()

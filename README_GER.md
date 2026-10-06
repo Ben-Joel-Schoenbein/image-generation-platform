@@ -8,6 +8,12 @@ sudo docker compose up -d
 
 Das Setup startet oder stoppt keine laufende Anwendung.
 
+## Qwen 2.1: Sampler, Scheduler und Textencoder
+
+Website und Discord bieten **ER-SDE**, den **Beta-Scheduler** und **Qwen3-VL 8B INT8 ConvRot** als unabhängige Auswahl für Qwen Image 2.1. Standard bleibt der vorhandene Workflow mit BF16-Encoder. Die bisherigen Prompt-Erweiterungen und individuellen LoRA-Zuordnungen bleiben nutzbar.
+
+Der zusätzliche Encoder benötigt rund 11 GB: `python3 scripts/download-qwen21-encoder.py`. Auf einem neuen Server `bash scripts/setup.sh --qwen21-int8-encoder` verwenden. [Installation, Auswahl und GPU-Vergleich](docs/qwen21-options.md).
+
 ## Voraussetzungen
 
 - Linux-Server mit passender NVIDIA-GPU; die bisherige A40 mit 48 GB ist die vorgesehene Umgebung.

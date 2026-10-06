@@ -36,6 +36,12 @@ Do not open TCP 8000 or 8188. The website API and ComfyUI are not published on h
 
 Install [Docker Engine for Ubuntu](https://docs.docker.com/engine/install/ubuntu/) and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) using their official installation guides. Verify `nvidia-smi` works on the host and that Docker can see the GPU before starting this stack.
 
+## Qwen Image 2.1 sampling and encoder selection
+
+The website and Discord support `qwen_sampler` (Default/Euler/ER-SDE), `qwen_scheduler` (Default/Simple/Beta), and `qwen_text_encoder` (BF16/INT8 ConvRot). Defaults preserve the existing workflow sampling and BF16 encoder. The separate prompt expansion models and per-model LoRA settings remain available.
+
+For an existing server, run `python3 scripts/download-qwen21-encoder.py` to install the optional 11 GB encoder, then recreate ComfyUI, web and Discord. For a new server, add `--qwen21-int8-encoder` to `bash scripts/setup.sh`. [Installation and GPU comparison](docs/qwen21-options.md).
+
 ## First start: automated setup
 
 The setup is tracked in the repository: `scripts/setup.sh`, `scripts/setup.py`, and `scripts/model-manifest.json`. The optional v23 downloader is `scripts/download-rapid-v23.py`.
