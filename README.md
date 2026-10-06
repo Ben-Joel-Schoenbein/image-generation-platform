@@ -238,3 +238,16 @@ workflows/               ComfyUI API workflow files
 models/                  local model weights (not included)
 data/                    SQLite accounts, rules, and generated images
 ```
+
+## Additional Edit 2511 precision variants and per-model LoRAs
+
+Qwen Image Edit 2511 FP8 Mixed and BF16 are available on the website and in Discord after their optional download. Existing installation:
+
+```bash
+python3 scripts/download-qwen-edit-2511.py --precision both
+bash studio-compose.sh up -d --build --no-deps --force-recreate comfyui web discord
+```
+
+For a fresh server, use `bash scripts/setup.sh --qwen-edit-2511 both` (or `fp8`/`bf16`), optionally with `--rapid-v23`, followed by `sudo docker compose up -d`. Both variants share the FP8 text encoder and VAE and require 71.03 GB extra downloads. These are regular base models. They accept three references and use separate `edit_steps` (20/30/40, default 40); Standard and Heretic prompt expansion remain available. See [installation and GPU comparison](docs/qwen-edit-2511.md).
+
+Under **Admin → LoRAs → Apply to models**, choose one or more of the five individual models for each file and set its strength. An empty model selection disables its application. For example, a file can be restricted to AIO v23 or Edit 2511 BF16. `models/loras/qwen21/` defaults to Qwen 2.1; other files retain the existing Edit/Rapid assignment. Models and adapters must have matching architectures; acceleration adapters may require custom schedules beyond the automatic loader. Existing saved strengths and family assignments are retained until edited. Website and Discord apply only LoRAs selected for the job's actual model. See [LoRA settings](docs/automatic-loras.md).

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "enabled": true,
+  "default_strength": 0.6,
+  "overrides": {
+    "Qwen_Image_Edit_2511_v2_p_and_a.safetensors": {
+      "enabled": true,
+      "strength": 0.6
+    }
+  }
+}

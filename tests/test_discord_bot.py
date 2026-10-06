@@ -3,6 +3,7 @@ import base64
 import importlib.util
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import discord
 import pytest
@@ -75,13 +76,15 @@ def test_discord_downloads_and_submits_all_ten_attachments(bot_module, monkeypat
     interaction = SimpleNamespace(guild_id=123, user=SimpleNamespace(id=456),
         response=SimpleNamespace(defer=defer, send_message=send), followup=SimpleNamespace(send=send))
     monkeypatch.setattr(bot_module.bot, "get_guild", lambda guild_id: object())
-    monkeypatch.setattr(bot_module.bot, "api_session", Api())
+    deliver = AsyncMock()
+    monkeypatch.setattr(bot_module, "deliver_generation", deliver)
     command = bot_module.bot.tree.get_command("edit")
     asyncio.run(command.callback(interaction, "combine all images", *[Attachment(i) for i in range(10)]))
     assert reads == list(range(10))
-    assert len(payloads[0]["references"]) == 10
-    assert [base64.b64decode(image["image_b64"]) for image in payloads[0]["references"]] == [str(i).encode() for i in range(10)]
-    assert "file" in sent[-1]
+    payload = deliver.call_args.args[4]
+    assert len(payload["references"]) == 10
+    assert [base64.b64decode(image["image_b64"]) for image in payload["references"]] == [str(i).encode() for i in range(10)]
+    assert payload["edit_steps"] == 40
 
 
 def test_bot_still_rejects_direct_messages(bot_module):

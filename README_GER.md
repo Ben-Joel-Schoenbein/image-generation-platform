@@ -30,7 +30,7 @@ bash scripts/setup.sh
 sudo docker compose up -d
 ```
 
-Für v23 NSFW beim Setup `--rapid-v23` ergänzen.
+Für v23 NSFW `--rapid-v23` ergänzen. Die zusätzlichen Edit-2511-Modelle erhältst du mit `--qwen-edit-2511 fp8`, `bf16` oder `both`. Beide Varianten brauchen zusammen 71 GB zusätzliche Modelldateien. [Installation und Vergleich](docs/qwen-edit-2511.md).
 
 Während des Setups wirst du nach Generator-Domain, Archiv-Domain und den Zugangsdaten gefragt. Bei den beiden Passwörtern erzeugt Enter jeweils ein zufälliges Passwort. Ein Discord-Bot-Token ist optional; mit Enter bleibt der Bot deaktiviert.
 
@@ -79,6 +79,7 @@ Die Bilder und JSON-Dateien mit Laufzeit und Einstellungen liegen danach unter `
 | --- | --- |
 | Aktuelle Qwen-Image-2.1-Workflows | BF16-Diffusionsmodell, Qwen3-VL-8B-Encoder, BF16-VAE und beide regulären PE-Encoder in `int8_convrot` |
 | Rapid AIO v19 NSFW | `Qwen-Rapid-AIO-NSFW-v19.safetensors` |
+| Optional Edit 2511 FP8 Mixed/BF16 | Diffusionsmodell(e), gemeinsamer Qwen-2.5-VL-FP8-Encoder und Qwen-Image-VAE |
 | Optional Rapid AIO v23 NSFW | `Qwen-Rapid-AIO-NSFW-v23.safetensors` |
 | Heretic für Textprompts | `pe_t2i_heretic-Q4_K_M.gguf`, Systemprompt und Lizenz |
 | Heretic für Bildbearbeitung | `pe_i2i_heretic-Q4_K_M.gguf`, BF16-Multimodal-Projektor, Systemprompt und Lizenz |
@@ -151,3 +152,7 @@ Tests aus diesem entpackten Paket ausführen:
 ```bash
 python3 tests/test_setup.py
 ```
+
+## LoRAs für Qwen 2.1 und Edit 2511
+
+Unter **Admin → LoRAs → Apply to models** lassen sich die erlaubten Einzelmodelle je Datei anhaken und die Stärke einstellen. Zur Auswahl stehen Qwen Image 2.1, AIO v19, AIO v23, Edit 2511 FP8 Mixed und BF16. Eine leere Auswahl deaktiviert die Anwendung dieser Datei. Dateien in `models/loras/qwen21/` werden standardmäßig Qwen 2.1 zugeordnet, andere Dateien Edit 2511/Rapid AIO. Bestehende Stärken und Familienzuordnungen bleiben erhalten, bis du die Häkchen änderst. Website und Discord verwenden ausschließlich die dem gewählten Modell zugeordneten LoRAs. Siehe [LoRA-Anleitung](docs/automatic-loras.md). Beschleunigungs-LoRAs können einen eigenen Sampling-Workflow benötigen.

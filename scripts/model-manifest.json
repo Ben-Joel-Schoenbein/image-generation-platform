@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "project_commit": "6405bcad89b4b337224c62196871621d9b2cf3fb",
+  "project_commit": "8c434c3b569e468d5aff51726cbf18c292df875b",
   "files": [
     {
       "repo": "Comfy-Org/Qwen-Image-2.1",
@@ -115,6 +115,46 @@
       "sha256": "fdb919fc81bea63f13759967fc92c9118142e5c70d4e6795199233a35eefa233",
       "optional": true,
       "model": "rapid_aio_v23_nsfw"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-Edit_ComfyUI",
+      "revision": "4c7c4ea236326cbae56d403d22a03c6cd86ad9a0",
+      "file": "split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+      "destination": "models/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors",
+      "size": 20533762817,
+      "sha256": "c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e",
+      "optional": true,
+      "model": "qwen_edit_2511_fp8"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image-Edit_ComfyUI",
+      "revision": "b6a0794717d3f5600f85c5edcdcd0c0eb93d7446",
+      "file": "split_files/diffusion_models/qwen_image_edit_2511_bf16.safetensors",
+      "destination": "models/diffusion_models/qwen_image_edit_2511_bf16.safetensors",
+      "size": 40861031560,
+      "sha256": "ae42d927b5fac4f278b9a894554c727e619727a63622976f2d95625be4bce08c",
+      "optional": true,
+      "model": "qwen_edit_2511_bf16"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "revision": "25608066f9bf5cdc28020836ce9549587053f346",
+      "file": "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "destination": "models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "size": 9384670680,
+      "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4",
+      "optional": true,
+      "model": "qwen_edit_2511_shared"
+    },
+    {
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "revision": "dfe60a0d63f0b946628080f070978594983b8b6e",
+      "file": "split_files/vae/qwen_image_vae.safetensors",
+      "destination": "models/vae/qwen_image_vae.safetensors",
+      "size": 253806246,
+      "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+      "optional": true,
+      "model": "qwen_edit_2511_shared"
     }
   ]
 }

@@ -62,17 +62,31 @@ def load_manifest():
         seen.add(item["destination"])
         if not isinstance(item.get("size"), int) or item["size"] <= 0: raise ValueError("Invalid model size")
         if not isinstance(item.get("optional", False), bool): raise ValueError("Invalid optional model flag")
-        if item.get("optional") and item.get("model") != "rapid_aio_v23_nsfw":
+        if item.get("optional") and item.get("model") not in {"rapid_aio_v23_nsfw", "qwen_edit_2511_fp8", "qwen_edit_2511_bf16", "qwen_edit_2511_shared"}:
             raise ValueError("Unknown optional model")
         if not (re.fullmatch(r"[a-f0-9]{64}", item.get("sha256", "")) or re.fullmatch(r"[a-f0-9]{40}", item.get("git_blob", ""))):
             raise ValueError("Missing model checksum")
     return manifest
 
 
-def selected_manifest(manifest, include_rapid_v23=False):
-    """The existing installation stays unchanged unless v23 is requested."""
+def selected_manifest(manifest, include_rapid_v23=False, qwen_edit_2511=None):
+    """Extra models are downloaded only for explicitly selected profiles."""
+    wanted = {"rapid_aio_v23_nsfw"} if include_rapid_v23 else set()
+    if qwen_edit_2511 is not None:
+        wanted.update(item["model"] for item in qwen_edit_manifest(manifest, qwen_edit_2511)["files"])
     return {**manifest, "files": [item for item in manifest["files"]
-            if not item.get("optional", False) or include_rapid_v23]}
+            if not item.get("optional", False) or item.get("model") in wanted]}
+
+
+def qwen_edit_manifest(manifest, precision="both"):
+    if precision not in {"fp8", "bf16", "both"}:
+        raise ValueError("Choose fp8, bf16 or both for Qwen Image Edit 2511")
+    wanted = {"qwen_edit_2511_shared"}
+    wanted.update("qwen_edit_2511_" + value for value in ("fp8", "bf16") if precision in {value, "both"})
+    files = [item for item in manifest["files"] if item.get("model") in wanted]
+    if len(files) != (4 if precision == "both" else 3) or {item.get("model") for item in files} != wanted:
+        raise ValueError("Qwen Image Edit 2511 models/dependencies are missing from the setup manifest")
+    return {**manifest, "files": files}
 
 
 def rapid_v23_manifest(manifest):
@@ -83,7 +97,7 @@ def rapid_v23_manifest(manifest):
 
 
 def project_check(root, manifest):
-    required = ["compose.yaml", ".env.example", "compose.heretic.yaml", "prompt-enhancer/models.ini", "web/heretic_client.py", "web/rapid_aio.py", "web/Dockerfile", "comfyui/Dockerfile"]
+    required = ["compose.yaml", ".env.example", "compose.heretic.yaml", "prompt-enhancer/models.ini", "web/heretic_client.py", "web/rapid_aio.py", "web/lora_support.py", "web/lora_defaults.json", "web/Dockerfile", "comfyui/Dockerfile"]
     for name in required:
         if not safe_path(root, name).is_file(): raise ValueError("Required current repository file missing: " + name)
     known = {item["destination"] for item in manifest["files"]}
@@ -104,6 +118,18 @@ def project_check(root, manifest):
     for filename in variants.values():
         if "models/checkpoints/" + filename not in known:
             raise ValueError("Rapid checkpoint variant differs from the setup manifest: " + filename)
+    constants = {t.id: ast.literal_eval(node.value) for node in source.body
+                 if isinstance(node, ast.Assign) for t in node.targets
+                 if isinstance(t, ast.Name) and t.id in {"EDIT2511_MODELS", "EDIT2511_TEXT_ENCODER", "EDIT2511_VAE"}}
+    edit_models = constants.get("EDIT2511_MODELS")
+    if not isinstance(edit_models, dict) or set(edit_models) != {"qwen_edit_2511_fp8", "qwen_edit_2511_bf16"}:
+        raise ValueError("Qwen Image Edit 2511 model variants are missing")
+    for filename in edit_models.values():
+        if "models/diffusion_models/" + filename not in known:
+            raise ValueError("Edit 2511 variant differs from the setup manifest: " + filename)
+    for key, folder in (("EDIT2511_TEXT_ENCODER", "text_encoders"), ("EDIT2511_VAE", "vae")):
+        if "models/" + folder + "/" + str(constants.get(key)) not in known:
+            raise ValueError("Edit 2511 dependency differs from the setup manifest: " + key)
     preset = configparser.ConfigParser(interpolation=None)
     preset.read_string("[global]\n" + (root/"prompt-enhancer/models.ini").read_text())
     for kind in ["pe-t2i", "pe-i2i"]:
@@ -351,11 +377,12 @@ def main():
     parser.add_argument("--check", action="store_true", help="Offline project/model plan only; no writes or downloads")
     parser.add_argument("--no-build", action="store_true")
     parser.add_argument("--rapid-v23", action="store_true", help="Also download Rapid AIO v23 NSFW (28.4 GB)")
+    parser.add_argument("--qwen-edit-2511", choices=("fp8", "bf16", "both"), help="Also download Edit 2511 and its encoder/VAE")
     args = parser.parse_args()
     root = args.project.expanduser().resolve()
     manifest = load_manifest()
     project_check(root, manifest)
-    manifest = selected_manifest(manifest, args.rapid_v23)
+    manifest = selected_manifest(manifest, args.rapid_v23, args.qwen_edit_2511)
     print(f"Aktueller Modellbedarf: {len(manifest['files'])} Dateien, {sum(item['size'] for item in manifest['files'])/1e9:.1f} GB.", flush=True)
     if not args.rapid_v23:
         print("Rapid AIO v23 NSFW ist optional: --rapid-v23 oder python3 scripts/download-rapid-v23.py")

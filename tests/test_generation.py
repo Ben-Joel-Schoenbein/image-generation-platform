@@ -41,13 +41,15 @@ def schema_for(workflow):
     schema = {}
     for node in workflow.values():
         schema[node["class_type"]] = {"input": {"required": {}}, "output": ["OUTPUT", "OUTPUT"]}
-    for kind, name, value in (("CheckpointLoaderSimple", "ckpt_name", "sd_xl_base_1.0.safetensors"),
-                              ("UNETLoader", "unet_name", "qwen_image_edit_2509_fp8_e4m3fn.safetensors"),
-                              ("CLIPLoader", "clip_name", "qwen_2.5_vl_7b_fp8_scaled.safetensors"),
-                              ("VAELoader", "vae_name", "qwen_image_vae.safetensors"),
-                              ("LoraLoaderModelOnly", "lora_name", "Qwen-Image-Edit-2509-Lightning-4steps-V1.0-bf16.safetensors")):
-        if kind in schema:
-            schema[kind]["input"]["required"][name] = [[value]]
+    for node in workflow.values():
+        for name in ("ckpt_name", "unet_name", "clip_name", "vae_name", "lora_name"):
+            value = node["inputs"].get(name)
+            if isinstance(value, str):
+                options = schema[node["class_type"]]["input"]["required"].setdefault(name, [[]])[0]
+                if value not in options:
+                    options.append(value)
+    schema["LoraLoaderModelOnly"] = {"input": {"required": {"lora_name": [[]]}}}
+    schema["StudioCapturePrompt"] = {"input": {"required": {"text": ["STRING"]}}}
     return schema
 
 
@@ -59,9 +61,9 @@ def test_workflow_keeps_every_reference_and_prunes_unused_inputs(studio, count):
     loads = [node for node in workflow.values() if node["class_type"] == "LoadImage"]
     assert len(loads) == count
     assert {node["inputs"]["image"] for node in loads} == {f"batch/reference-{i}.png" for i in range(count)}
-    reference_inputs = [key for key in workflow["6"]["inputs"] if key.startswith("image")]
+    reference_inputs = [key for key in workflow["5"]["inputs"] if key.startswith("image")]
     assert len(reference_inputs) == count
-    assert isinstance(workflow["12"]["inputs"]["seed"], int)
+    assert isinstance(workflow["6"]["inputs"]["seed"], int)
     studio.validate_workflow(workflow, schema_for(workflow))
     for node in workflow.values():
         for value in node["inputs"].values():
@@ -69,11 +71,11 @@ def test_workflow_keeps_every_reference_and_prunes_unused_inputs(studio, count):
                 assert value[0] in workflow
 
 
-def test_missing_sdxl_reports_exact_model_path(studio):
+def test_missing_qwen21_reports_exact_model_path(studio):
     workflow = studio.build_workflow(json.loads(studio.WORKFLOW_TEXT.read_text()), [], "a landscape")
     schema = schema_for(workflow)
-    schema["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"] = [[]]
-    with pytest.raises(RuntimeError, match="models/checkpoints/sd_xl_base_1.0.safetensors"):
+    schema["UNETLoader"]["input"]["required"]["unet_name"] = [[]]
+    with pytest.raises(RuntimeError, match="models/diffusion_models/qwen_image_2.1_bf16.safetensors"):
         studio.validate_workflow(workflow, schema)
 
 
@@ -90,6 +92,13 @@ def install_comfy_mock(studio, monkeypatch, reject=False):
     text = json.loads(studio.WORKFLOW_TEXT.read_text())
     edit = json.loads(studio.WORKFLOW_EDIT.read_text())
     schema = schema_for(text) | schema_for(edit)
+    class Monitor:
+        client_id = "test-client"
+        def __init__(self, *args): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): pass
+        def bind(self, *args): pass
+    monkeypatch.setattr(studio, "ProgressMonitor", Monitor)
 
     def handle(request):
         calls.append(request)
@@ -109,7 +118,7 @@ def install_comfy_mock(studio, monkeypatch, reject=False):
     real_client = httpx.AsyncClient
     monkeypatch.setattr(studio.httpx, "AsyncClient", lambda **kwargs: real_client(transport=httpx.MockTransport(handle), **kwargs))
 
-    async def ready(*args):
+    async def ready(*args, **kwargs):
         return {"filename": "output.png", "subfolder": "", "type": "output"}
 
     monkeypatch.setattr(studio, "wait_for_image", ready)
@@ -135,7 +144,7 @@ def test_website_ten_files_reach_comfy_and_image_is_saved(studio, monkeypatch):
         assert "Image ready" in response.text
         assert len([call for call in calls if call.url.path == "/upload/image"]) == 10
         graph = json.loads(next(call for call in calls if call.url.path == "/prompt").content)["prompt"]
-        assert "image10" in graph["6"]["inputs"]
+        assert graph["5"]["inputs"]["images.image_10"] == ["110", 0]
         assert len(list(studio.DATA_DIR.glob("images/*/*.png"))) == 1
 
 

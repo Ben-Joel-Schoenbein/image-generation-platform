@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 from PIL import Image, ImageOps
-from rapid_aio import is_rapid_model
+from rapid_aio import is_qwen_edit_model
 
 MODELS = {"text": "pe-t2i", "edit": "pe-i2i"}
 PROMPTS = Path(__file__).resolve().parent / "heretic_prompts"
@@ -64,7 +64,7 @@ def reference_parts(references):
 
 def capture_prompt(workflow, model):
     """Expose the actual Standard rewrite in ComfyUI history and websocket UI."""
-    encoder = workflow["3" if is_rapid_model(model) else "5"]
+    encoder = workflow["3" if is_qwen_edit_model(model) else "5"]
     if "900" in workflow:
         raise RuntimeError("Workflow node 900 is reserved for prompt preview")
     workflow["900"] = {"class_type": "StudioCapturePrompt", "inputs": {"text": encoder["inputs"]["prompt"]}}

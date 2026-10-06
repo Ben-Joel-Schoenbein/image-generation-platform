@@ -25,8 +25,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from PIL import Image
 from qwen_quality import configure_workflow, prepare_prompt, validate_options
 # QWEN_RAPID_AIO_V19_INTEGRATION_V1
-from rapid_aio import is_rapid_model, build_rapid_workflow, output_dimensions, rapid_controls, validate_generation_model
-from lora_support import CONFIG_KEY as LORA_CONFIG_KEY, parse_config as parse_lora_config, read_config as read_lora_config, selected_loras, install_lora_routes
+from rapid_aio import is_rapid_model, is_edit2511_model, is_qwen_edit_model, build_rapid_workflow, build_edit2511_workflow, output_dimensions, rapid_controls, validate_generation_model
+from lora_support import CONFIG_KEY as LORA_CONFIG_KEY, parse_config as parse_lora_config, read_config as read_lora_config, selected_loras, apply_loras, install_lora_routes
 # IMAGE_STUDIO_HERETIC_PE_V1
 from heretic_client import resolve_prompt_expansion, rewrite_prompt, capture_prompt
 from generation_progress import JOBS, ProgressMonitor, comfy_get, progress_markup, install_progress_routes
@@ -206,10 +206,10 @@ def validate_reference_set(mode: str, references: list[ReferenceImage]):
         raise ReferenceError(f"Reference images together must be at most {MAX_REFERENCE_TOTAL_MB} MB", 413)
 
 
-def validate_selected_model(model, mode, references, rapid_steps, quality="standard"):
+def validate_selected_model(model, mode, references, rapid_steps, quality="standard", edit_steps=40):
     try:
-        validate_generation_model(model, mode, len(references), rapid_steps)
-        if is_rapid_model(model):
+        validate_generation_model(model, mode, len(references), rapid_steps, edit_steps)
+        if is_qwen_edit_model(model):
             source_size = None
             if references:
                 with Image.open(io.BytesIO(references[0].raw)) as first_image:
@@ -305,7 +305,7 @@ def comfy_error(response: httpx.Response) -> str:
 
 
 async def render_image(mode: str, prompt: str, references: list[ReferenceImage] | None = None, *,
-                       quality: str = "standard", edit_intent: str = "edit", enhance_prompt: bool | None = None, seed: int | None = None, progress=None, model: str = "qwen21", rapid_steps: int = 4, prompt_expansion: str = "auto") -> bytes:
+                       quality: str = "standard", edit_intent: str = "edit", enhance_prompt: bool | None = None, seed: int | None = None, progress=None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto") -> bytes:
     references = references or []
     selection = resolve_prompt_expansion(prompt_expansion, enhance_prompt, model)
     enhance_prompt = selection == 'standard'
@@ -313,7 +313,7 @@ async def render_image(mode: str, prompt: str, references: list[ReferenceImage] 
         progress.prompt_expansion = selection
     try:
         validate_options(quality, edit_intent, seed)
-        validate_generation_model(model, mode, len(references), rapid_steps)
+        validate_generation_model(model, mode, len(references), rapid_steps, edit_steps)
     except ValueError as exc:
         raise ReferenceError(str(exc)) from exc
     prompt = prepare_prompt(mode, prompt, edit_intent)
@@ -340,21 +340,24 @@ async def render_image(mode: str, prompt: str, references: list[ReferenceImage] 
             info = await comfy_get(client, f"{COMFY_URL}/object_info", job=progress)
             info.raise_for_status()
             schema = info.json()
-            if is_rapid_model(model):
-                try:
-                    loras = selected_loras(schema, read_lora_config(db))
-                except ValueError as exc:
-                    raise ReferenceError(str(exc)) from exc
+            try:
+                loras = selected_loras(schema, read_lora_config(db), model=model)
+            except ValueError as exc:
+                raise ReferenceError(str(exc)) from exc
+            if is_qwen_edit_model(model):
                 source_size = None
                 if references:
                     with Image.open(io.BytesIO(references[0].raw)) as first_image:
                         source_size = first_image.size
                 enhancer_template = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt) if enhance_prompt else None
-                workflow = build_rapid_workflow(mode, uploads, prompt, quality, seed, rapid_steps,
-                                                source_size, enhancer_template, model=model, loras=loras)
+                builder = build_edit2511_workflow if is_edit2511_model(model) else build_rapid_workflow
+                steps = edit_steps if is_edit2511_model(model) else rapid_steps
+                workflow = builder(mode, uploads, prompt, quality, seed, steps,
+                                   source_size, enhancer_template, model=model, loras=loras)
             else:
                 workflow = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt)
                 workflow = configure_workflow(workflow, prompt, quality, enhance_prompt, seed)
+                workflow = apply_loras(workflow, loras, model_node="4")
             if selection == 'standard':
                 capture_prompt(workflow, model)
             validate_workflow(workflow, schema)
@@ -497,7 +500,7 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
                                 csrf_token: str = Form(...), generation_job_id: str = Form(...),
                                 references: list[UploadFile] | None = File(None), reference: UploadFile | None = File(None),
                                 quality: str = Form("standard"), edit_intent: str = Form("edit"),
-                                enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4), prompt_expansion: str = Form("auto")):
+                                enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4), edit_steps: int = Form(40), prompt_expansion: str = Form("auto")):
     user = current_user(request)
     if not user:
         return JSONResponse({"error": "Sign in again before generating."}, status_code=401)
@@ -520,12 +523,12 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
             validate_reference_set("edit", images)
         resolve_prompt_expansion(prompt_expansion, enhance_prompt, model)
         validate_reference_set(mode, images)
-        validate_selected_model(model, mode, images, rapid_steps, quality)
+        validate_selected_model(model, mode, images, rapid_steps, quality, edit_steps)
         job, created = JOBS.create(user["id"], generation_job_id)
         if created:
             async def operation(progress):
                 png = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent,
-                                         enhance_prompt=enhance_prompt, seed=seed, progress=progress, model=model, rapid_steps=rapid_steps, prompt_expansion=prompt_expansion)
+                                         enhance_prompt=enhance_prompt, seed=seed, progress=progress, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion)
                 progress.update("saving", "Saving to your gallery")
                 image_id = uuid.uuid4().hex
                 user_dir = DATA_DIR / "images" / str(user["id"])
@@ -549,7 +552,7 @@ async def create_generation_job(request: Request, mode: str = Form(...), prompt:
 async def generate(request: Request, mode: str = Form(...), prompt: str = Form(...), csrf_token: str = Form(...),
                    references: list[UploadFile] | None = File(None), reference: UploadFile | None = File(None),
                    quality: str = Form("standard"), edit_intent: str = Form("edit"),
-                   enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4), prompt_expansion: str = Form("auto")):
+                   enhance_prompt: bool = Form(False), seed: int | None = Form(None), model: str = Form("qwen21"), rapid_steps: int = Form(4), edit_steps: int = Form(40), prompt_expansion: str = Form("auto")):
     user = current_user(request)
     if not user:
         return RedirectResponse("/login", status_code=303)
@@ -571,8 +574,8 @@ async def generate(request: Request, mode: str = Form(...), prompt: str = Form(.
             validate_reference_set("edit", images)
         resolve_prompt_expansion(prompt_expansion, enhance_prompt, model)
         validate_reference_set(mode, images)
-        validate_selected_model(model, mode, images, rapid_steps, quality)
-        image_bytes = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent, enhance_prompt=enhance_prompt, seed=seed, model=model, rapid_steps=rapid_steps, prompt_expansion=prompt_expansion)
+        validate_selected_model(model, mode, images, rapid_steps, quality, edit_steps)
+        image_bytes = await render_image(mode, prompt, images, quality=quality, edit_intent=edit_intent, enhance_prompt=enhance_prompt, seed=seed, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion)
         image_id = uuid.uuid4().hex
         user_dir = DATA_DIR / "images" / str(user["id"])
         user_dir.mkdir(parents=True, exist_ok=True)
@@ -606,7 +609,8 @@ class BotGeneration(BaseModel):
     enhance_prompt: bool | None = None
     seed: int | None = Field(default=None, ge=0, le=4294967295)
     model: str = "qwen21"
-    rapid_steps: int = 4
+    rapid_steps: int = Field(default=4, strict=True)
+    edit_steps: int = Field(default=40, strict=True)
     prompt_expansion: str = "auto"
 
 
@@ -645,13 +649,13 @@ async def create_discord_job(request: Request, payload: BotGeneration):
             validate_reference_set("edit", images)
         resolve_prompt_expansion(payload.prompt_expansion, payload.enhance_prompt, payload.model)
         validate_reference_set(payload.mode, images)
-        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality)
+        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality, payload.edit_steps)
         job, created = JOBS.create(owner, payload.generation_job_id or uuid.uuid4().hex)
         if created:
             async def operation(progress):
                 png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality,
                                          edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt,
-                                         seed=payload.seed, progress=progress, model=payload.model, rapid_steps=payload.rapid_steps, prompt_expansion=payload.prompt_expansion)
+                                         seed=payload.seed, progress=progress, model=payload.model, rapid_steps=payload.rapid_steps, edit_steps=payload.edit_steps, prompt_expansion=payload.prompt_expansion)
                 progress.update("saving", "Preparing the Discord image")
                 with Image.open(io.BytesIO(png)) as image:
                     out = io.BytesIO()
@@ -712,8 +716,8 @@ async def discord_generate(request: Request, payload: BotGeneration):
             validate_reference_set("edit", images)
         resolve_prompt_expansion(payload.prompt_expansion, payload.enhance_prompt, payload.model)
         validate_reference_set(payload.mode, images)
-        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality)
-        png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality, edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt, seed=payload.seed, model=payload.model, rapid_steps=payload.rapid_steps, prompt_expansion=payload.prompt_expansion)
+        validate_selected_model(payload.model, payload.mode, images, payload.rapid_steps, payload.quality, payload.edit_steps)
+        png = await render_image(payload.mode, payload.prompt.strip(), images, quality=payload.quality, edit_intent=payload.edit_intent, enhance_prompt=payload.enhance_prompt, seed=payload.seed, model=payload.model, rapid_steps=payload.rapid_steps, edit_steps=payload.edit_steps, prompt_expansion=payload.prompt_expansion)
         with Image.open(io.BytesIO(png)) as image:
             image = image.convert("RGB")
             out = io.BytesIO()

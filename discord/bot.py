@@ -20,8 +20,11 @@ MAX_UPLOAD = int(os.getenv("MAX_UPLOAD_MB", "15")) * 1024 * 1024
 MAX_TOTAL_UPLOAD = int(os.getenv("MAX_REFERENCE_TOTAL_MB", "60")) * 1024 * 1024
 MAX_REFERENCES = 10
 RAPID_MODELS = {"rapid_aio_v19", "rapid_aio_v23_nsfw"}
+EDIT2511_MODELS = {"qwen_edit_2511_fp8", "qwen_edit_2511_bf16"}
 MODEL_CHOICES = [
     app_commands.Choice(name="Qwen Image 2.1", value="qwen21"),
+    app_commands.Choice(name="Qwen Image Edit 2511 — FP8 Mixed", value="qwen_edit_2511_fp8"),
+    app_commands.Choice(name="Qwen Image Edit 2511 — BF16", value="qwen_edit_2511_bf16"),
     app_commands.Choice(name="Qwen Rapid AIO v19 — NSFW", value="rapid_aio_v19"),
     app_commands.Choice(name="Qwen Rapid AIO v23 — NSFW", value="rapid_aio_v23_nsfw"),
 ]
@@ -80,10 +83,10 @@ async def generate(interaction: discord.Interaction, mode: str, prompt: str, ref
         await interaction.response.send_message("Attach a reference image for `/edit`.", ephemeral=True)
         return
     model = options.get("model", "qwen21")
-    if model not in {"qwen21", *RAPID_MODELS}:
+    if model not in {"qwen21", *RAPID_MODELS, *EDIT2511_MODELS}:
         await interaction.response.send_message("Choose a supported image model.", ephemeral=True)
         return
-    reference_limit = 4 if model in RAPID_MODELS else MAX_REFERENCES
+    reference_limit = 3 if model in EDIT2511_MODELS else 4 if model in RAPID_MODELS else MAX_REFERENCES
     if len(references) > reference_limit:
         await interaction.response.send_message(f"Use at most {reference_limit} reference images for this model.", ephemeral=True)
         return
@@ -120,11 +123,12 @@ async def generate(interaction: discord.Interaction, mode: str, prompt: str, ref
 @app_commands.describe(prompt="Describe the image you want")
 @app_commands.describe(prompt_expansion="Prompt expansion: Auto follows model defaults or enhance_prompt")
 @app_commands.choices(prompt_expansion=[app_commands.Choice(name="Auto", value="auto"), app_commands.Choice(name="Off", value="off"), app_commands.Choice(name="Standard", value="standard"), app_commands.Choice(name="Heretic", value="heretic")])
-@app_commands.describe(model="Image model: Rapid AIO accepts up to 4 references; Qwen 2.1 accepts 10", rapid_steps="Rapid AIO sampling steps")
+@app_commands.describe(model="Qwen 2.1: 10 references; Rapid AIO: 4; Edit 2511: 3", rapid_steps="Rapid AIO sampling steps", edit_steps="Edit 2511 sampling steps (20, 30 or 40)")
+@app_commands.choices(edit_steps=[app_commands.Choice(name="20 — fast", value=20), app_commands.Choice(name="30", value=30), app_commands.Choice(name="40 — recommended", value=40)])
 @app_commands.choices(model=MODEL_CHOICES, rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
 @app_commands.choices(quality=[app_commands.Choice(name="Standard (1K)", value="standard"), app_commands.Choice(name="High (2K)", value="high")])
-async def imagine(interaction: discord.Interaction, prompt: str, quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, prompt_expansion: str = "auto"):
-    await generate(interaction, "text", prompt, [], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, model=model, rapid_steps=rapid_steps, prompt_expansion=prompt_expansion)
+async def imagine(interaction: discord.Interaction, prompt: str, quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto"):
+    await generate(interaction, "text", prompt, [], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion)
 
 
 @bot.tree.command(name="edit", description="Create or edit an image using up to 10 reference images")
@@ -136,7 +140,8 @@ async def imagine(interaction: discord.Interaction, prompt: str, quality: str = 
                        reference8="Reference image 8", reference9="Reference image 9", reference10="Reference image 10")
 @app_commands.describe(prompt_expansion="Prompt expansion: Auto follows model defaults or enhance_prompt")
 @app_commands.choices(prompt_expansion=[app_commands.Choice(name="Auto", value="auto"), app_commands.Choice(name="Off", value="off"), app_commands.Choice(name="Standard", value="standard"), app_commands.Choice(name="Heretic", value="heretic")])
-@app_commands.describe(model="Image model: Rapid AIO accepts up to 4 references; Qwen 2.1 accepts 10", rapid_steps="Rapid AIO sampling steps")
+@app_commands.describe(model="Qwen 2.1: 10 references; Rapid AIO: 4; Edit 2511: 3", rapid_steps="Rapid AIO sampling steps", edit_steps="Edit 2511 sampling steps (20, 30 or 40)")
+@app_commands.choices(edit_steps=[app_commands.Choice(name="20 — fast", value=20), app_commands.Choice(name="30", value=30), app_commands.Choice(name="40 — recommended", value=40)])
 @app_commands.choices(model=MODEL_CHOICES, rapid_steps=[app_commands.Choice(name="4 — fast", value=4), app_commands.Choice(name="6", value=6), app_commands.Choice(name="8 — more detail", value=8)])
 @app_commands.choices(quality=[app_commands.Choice(name="Standard (1K)", value="standard"), app_commands.Choice(name="High (2K)", value="high")])
 async def edit(interaction: discord.Interaction, prompt: str, reference: discord.Attachment,
@@ -145,13 +150,13 @@ async def edit(interaction: discord.Interaction, prompt: str, reference: discord
                reference6: discord.Attachment | None = None, reference7: discord.Attachment | None = None,
                reference8: discord.Attachment | None = None, reference9: discord.Attachment | None = None,
                reference10: discord.Attachment | None = None, recreate: bool = False,
-               quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, prompt_expansion: str = "auto"):
+               quality: str = "standard", enhance_prompt: bool | None = None, seed: int | None = None, model: str = "qwen21", rapid_steps: int = 4, edit_steps: int = 40, prompt_expansion: str = "auto"):
     await generate(interaction, "edit", prompt, [image for image in
         (reference, reference2, reference3, reference4, reference5, reference6, reference7, reference8, reference9, reference10)
-        if image is not None], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, edit_intent="recreate" if recreate else "edit", model=model, rapid_steps=rapid_steps, prompt_expansion=prompt_expansion)
+        if image is not None], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, edit_intent="recreate" if recreate else "edit", model=model, rapid_steps=rapid_steps, edit_steps=edit_steps, prompt_expansion=prompt_expansion)
 
 
-@bot.tree.command(name="loras", description="Show detected Rapid AIO LoRAs and their configured strengths")
+@bot.tree.command(name="loras", description="Show detected LoRAs, selected models and configured strengths")
 @app_commands.guild_only()
 @app_commands.allowed_installs(guilds=True, users=False)
 async def list_loras(interaction: discord.Interaction):
@@ -164,13 +169,19 @@ async def list_loras(interaction: discord.Interaction):
             data = await response.json()
             if response.status != 200:
                 raise RuntimeError(data.get("error", "LoRA discovery failed"))
-        lines = ["**Rapid AIO LoRAs**", "Automatic LoRAs: " + ("enabled" if data["enabled"] else "disabled"),
+        lines = ["**Qwen LoRAs**", "Automatic LoRAs: " + ("enabled" if data["enabled"] else "disabled"),
                  f"Default strength for new files: {data['default_strength']:g}"]
         items = data.get("items", [])
         omitted = 0
         for index, item in enumerate(items):
             name = discord.utils.escape_mentions(discord.utils.escape_markdown(item["name"]))
-            line = f"• {name}: {item['strength']:g} ({'active' if item['active'] else 'disabled'})"
+            if "models" in item:
+                model_names = {choice.value: choice.name for choice in MODEL_CHOICES}
+                assignment = ", ".join(model_names.get(model, model) for model in item["models"]) or "no models selected"
+                assignment = discord.utils.escape_mentions(discord.utils.escape_markdown(assignment))
+            else:
+                assignment = 'Qwen 2.1' if item.get('target') == 'qwen21' else 'Edit 2511 / Rapid AIO'
+            line = f"• {name}: {item['strength']:g} ({'active' if item['active'] else 'disabled'}; {assignment})"
             if len("\n".join(lines)) + len(line) > 1600:
                 omitted = len(items) - index
                 break
@@ -179,7 +190,7 @@ async def list_loras(interaction: discord.Interaction):
             lines.append(f"… {omitted} more files; view the complete list on the website.")
         if not items:
             lines.append("No LoRA files found in models/loras.")
-        lines.append("The website administrator can change strengths under Admin → LoRAs. Settings apply to /imagine and /edit with Rapid AIO.")
+        lines.append("The website administrator can choose models and strengths under Admin → LoRAs. /imagine and /edit apply only the LoRAs assigned to the selected model.")
         await interaction.followup.send("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, RuntimeError) as exc:
         await interaction.followup.send("LoRA service error: " + str(exc)[:500], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())

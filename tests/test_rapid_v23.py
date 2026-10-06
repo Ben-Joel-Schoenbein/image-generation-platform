@@ -93,7 +93,7 @@ def test_rapid_reference_and_sampling_limits(model):
 
 
 def test_only_requested_nsfw_variant_and_qwen_remain_available():
-    assert set(rapid.MODEL_LIMITS) == {"qwen21", "rapid_aio_v19", V23}
+    assert set(rapid.MODEL_LIMITS) == {"qwen21", "rapid_aio_v19", V23, *rapid.EDIT2511_MODELS}
     rapid.validate_generation_model("qwen21", "edit", 10)
     with pytest.raises(ValueError, match="supported"):
         rapid.validate_generation_model("rapid_aio_v23_sfw", "text", 0)
@@ -124,7 +124,7 @@ def install_comfy_mock(studio, monkeypatch, lora_names=()):
     for path in (studio.WORKFLOW_TEXT, studio.WORKFLOW_EDIT):
         for node in json.loads(path.read_text()).values():
             schema[node["class_type"]] = {"input": {"required": {}}}
-    for kind in ("CheckpointLoaderSimple", "EmptySD3LatentImage", "StudioRapidAIOTextEncode", "TextEncodeQwenImageEditPlus", "KSampler", "VAEDecode", "SaveImage", "StudioCapturePrompt", "LoadImage"):
+    for kind in ("CheckpointLoaderSimple", "EmptySD3LatentImage", "StudioRapidAIOTextEncode", "TextEncodeQwenImageEditPlus", "KSampler", "VAEDecode", "SaveImage", "StudioCapturePrompt", "LoadImage", "ModelSamplingAuraFlow", "CFGNorm"):
         schema[kind] = {"input": {"required": {}}}
     schema["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"] = [list(rapid.RAPID_MODELS.values())]
     schema["LoraLoaderModelOnly"] = {"input": {"required": {"lora_name": [lora_names if isinstance(lora_names, list) else list(lora_names)], "model": ["MODEL"], "strength_model": ["FLOAT"]}}}
@@ -254,7 +254,7 @@ def test_real_discord_command_registration_includes_v23(bot_module):
     for name in ("imagine", "edit"):
         command = bot_module.bot.tree.get_command(name)
         models = next(parameter for parameter in command.parameters if parameter.name == "model")
-        assert {choice.value for choice in models.choices} == {"qwen21", *MODELS}
+        assert {choice.value for choice in models.choices} == {"qwen21", *MODELS, *rapid.EDIT2511_MODELS}
         assert len(command.parameters) <= 25
         assert {"rapid_steps", "prompt_expansion"}.issubset({p.name for p in command.parameters})
     assert len([p for p in bot_module.bot.tree.get_command("edit").parameters if p.type == discord.AppCommandOptionType.attachment]) == 10
