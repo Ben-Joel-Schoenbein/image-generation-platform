@@ -118,7 +118,7 @@ def test_standard_expansion_and_prompt_preview_use_the_rapid_encoder(studio, mod
         assert graph["11"]["inputs"]["images.image0"] == ["101", 0]
 
 
-def install_comfy_mock(studio, monkeypatch):
+def install_comfy_mock(studio, monkeypatch, lora_names=()):
     graphs, uploads = [], []
     schema = {}
     for path in (studio.WORKFLOW_TEXT, studio.WORKFLOW_EDIT):
@@ -127,6 +127,7 @@ def install_comfy_mock(studio, monkeypatch):
     for kind in ("CheckpointLoaderSimple", "EmptySD3LatentImage", "StudioRapidAIOTextEncode", "TextEncodeQwenImageEditPlus", "KSampler", "VAEDecode", "SaveImage", "StudioCapturePrompt", "LoadImage"):
         schema[kind] = {"input": {"required": {}}}
     schema["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"] = [list(rapid.RAPID_MODELS.values())]
+    schema["LoraLoaderModelOnly"] = {"input": {"required": {"lora_name": [lora_names if isinstance(lora_names, list) else list(lora_names)], "model": ["MODEL"], "strength_model": ["FLOAT"]}}}
     schema["StudioRapidAIOTextEncode"]["input"]["required"] = {name: ["TYPE"] for name in ("clip", "vae", "latent", "prompt")}
 
     def handle(request):

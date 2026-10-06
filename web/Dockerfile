@@ -4,6 +4,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY rapid_aio.py .
+COPY lora_support.py lora_defaults.json .
 COPY heretic_client.py .
 COPY heretic_prompts ./heretic_prompts
 COPY app.py .

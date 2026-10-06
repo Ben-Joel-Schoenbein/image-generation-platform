@@ -26,6 +26,7 @@ from PIL import Image
 from qwen_quality import configure_workflow, prepare_prompt, validate_options
 # QWEN_RAPID_AIO_V19_INTEGRATION_V1
 from rapid_aio import is_rapid_model, build_rapid_workflow, output_dimensions, rapid_controls, validate_generation_model
+from lora_support import CONFIG_KEY as LORA_CONFIG_KEY, parse_config as parse_lora_config, read_config as read_lora_config, selected_loras, install_lora_routes
 # IMAGE_STUDIO_HERETIC_PE_V1
 from heretic_client import resolve_prompt_expansion, rewrite_prompt, capture_prompt
 from generation_progress import JOBS, ProgressMonitor, comfy_get, progress_markup, install_progress_routes
@@ -75,6 +76,7 @@ def initialize():
     with db() as conn:
         conn.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0)")
         conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        conn.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (LORA_CONFIG_KEY, json.dumps(parse_lora_config())))
         conn.execute("CREATE TABLE IF NOT EXISTS generations (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, image_path TEXT NOT NULL, prompt TEXT NOT NULL, created_at INTEGER NOT NULL, FOREIGN KEY(user_id) REFERENCES users(id))")
         if not conn.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
             conn.execute("INSERT INTO users(username,password_hash,is_admin) VALUES(?,?,1)", (username, hash_password(password)))
@@ -125,7 +127,7 @@ def page(title: str, body: str, user=None, notice="", csrf_token="") -> HTMLResp
     if user:
         nav = f'<div class="nav"><span>Signed in as <b>{html.escape(user["username"])}</b></span><a href="/">Gallery</a>'
         if user["is_admin"]:
-            nav += '<a href="/admin">Admin settings</a>'
+            nav += '<a href="/admin">Admin settings</a><a href="/admin/loras">LoRAs</a>'
         nav += '<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="{{CSRF}}"><button class="link">Sign out</button></form></div>'
     notice_html = f'<p class="notice">{html.escape(notice)}</p>' if notice else ""
     doc = f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} · Image Studio</title>
@@ -335,22 +337,27 @@ async def render_image(mode: str, prompt: str, references: list[ReferenceImage] 
                 uploaded = await client.post(f"{COMFY_URL}/upload/image", files={"image": (reference.filename, reference.raw, reference.content_type)})
                 uploaded.raise_for_status()
                 uploads.append(uploaded.json())
+            info = await comfy_get(client, f"{COMFY_URL}/object_info", job=progress)
+            info.raise_for_status()
+            schema = info.json()
             if is_rapid_model(model):
+                try:
+                    loras = selected_loras(schema, read_lora_config(db))
+                except ValueError as exc:
+                    raise ReferenceError(str(exc)) from exc
                 source_size = None
                 if references:
                     with Image.open(io.BytesIO(references[0].raw)) as first_image:
                         source_size = first_image.size
                 enhancer_template = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt) if enhance_prompt else None
                 workflow = build_rapid_workflow(mode, uploads, prompt, quality, seed, rapid_steps,
-                                                source_size, enhancer_template, model=model)
+                                                source_size, enhancer_template, model=model, loras=loras)
             else:
                 workflow = build_workflow(json.loads(workflow_path.read_text()), uploads, prompt)
                 workflow = configure_workflow(workflow, prompt, quality, enhance_prompt, seed)
             if selection == 'standard':
                 capture_prompt(workflow, model)
-            info = await comfy_get(client, f"{COMFY_URL}/object_info", job=progress)
-            info.raise_for_status()
-            validate_workflow(workflow, info.json())
+            validate_workflow(workflow, schema)
             async with ProgressMonitor(COMFY_URL, workflow, progress) as monitor:
                 queued = await client.post(f"{COMFY_URL}/prompt", json={"prompt": workflow, "client_id": monitor.client_id})
                 if queued.is_error:
@@ -801,3 +808,7 @@ async def internal_generation_status(request: Request):
     if not discord_jobs_authorized(request):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     return {"active_jobs": sum(job.state not in {"done", "error"} for job in JOBS.jobs.values())}
+
+
+install_lora_routes(app, db=db, current_user=current_user, csrf=csrf, verify_csrf=verify_csrf,
+                    page=page, comfy_url=COMFY_URL, api_authorized=discord_jobs_authorized)

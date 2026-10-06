@@ -3,6 +3,7 @@ import copy
 import math
 import secrets
 import json
+from lora_support import apply_loras
 
 MODEL_FILE = "Qwen-Rapid-AIO-NSFW-v19.safetensors"
 RAPID_MODEL = "rapid_aio_v19"
@@ -47,7 +48,7 @@ def output_dimensions(quality, source_size=None):
 
 
 def build_rapid_workflow(mode, uploads, prompt, quality="standard", seed=None,
-                         rapid_steps=4, source_size=None, enhancer_template=None, model=RAPID_MODEL):
+                         rapid_steps=4, source_size=None, enhancer_template=None, model=RAPID_MODEL, loras=None):
     validate_generation_model(model, mode, len(uploads), rapid_steps)
     if not is_rapid_model(model):
         raise ValueError("Choose a Rapid AIO checkpoint for this workflow")
@@ -107,7 +108,7 @@ def build_rapid_workflow(mode, uploads, prompt, quality="standard", seed=None,
             for value in node.get("inputs", {}).values():
                 if isinstance(value, list) and len(value) == 2 and value[0] not in graph:
                     raise ValueError("Unexpected prompt expansion dependency; disable Expand description")
-    return graph
+    return apply_loras(graph, loras)
 
 
 def rapid_controls():
@@ -118,6 +119,7 @@ def rapid_controls():
 <label id="rapid-steps-label" hidden>Sampling steps<select name="rapid_steps" id="rapid-steps" disabled>
 <option value="4">4 — fast</option><option value="6">6</option><option value="8">8 — more detail</option></select></label>
 <p id="rapid-model-help" class="muted" hidden>Rapid AIO accepts up to 4 reference images. Output follows Image 1's aspect ratio. Expand description is optional and can take several minutes.</p>
+<p id="rapid-lora-help" class="muted" hidden>Detected LoRAs are applied automatically using the shared admin settings.</p>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const rapidModels = __RAPID_MODELS__;
@@ -130,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const steps = form.elements.rapid_steps;
   const stepLabel = document.getElementById('rapid-steps-label');
   const help = document.getElementById('rapid-model-help');
+  const loraHelp = document.getElementById('rapid-lora-help');
   let previous = model.value;
   const preferences = {qwen21: readEnhancer(), rapid_aio_v19: enhancer.tagName === 'SELECT' ? 'off' : false};
   const check = () => {
@@ -141,6 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const update = () => {
     const rapid = rapidModels.includes(model.value);
     steps.disabled = !rapid; stepLabel.hidden = !rapid; help.hidden = !rapid;
+    if (loraHelp) loraHelp.hidden = !rapid;
     check();
   };
   model.addEventListener('change', () => {

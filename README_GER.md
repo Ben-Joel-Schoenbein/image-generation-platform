@@ -122,6 +122,14 @@ bash scripts/setup.sh --no-build
 sudo docker compose up -d --build
 ```
 
+## LoRAs automatisch verwenden
+
+Lege passende LoRA-Dateien unter `models/loras/` ab; Unterordner werden ebenfalls erkannt. Das Setup erstellt den Ordner. Neue Dateien werden beim nächsten Rapid-AIO-Auftrag automatisch mit Stärke **0,6** aktiviert. Die Einstellungen gelten gemeinsam für v19 NSFW und v23 NSFW sowie für Website und Discord.
+
+Als Administrator findest du unter **LoRAs** (`/admin/loras`) die Standardstärke für neue Dateien, eine Stärke pro Datei und Schalter zum einzelnen oder vollständigen Deaktivieren. Zulässig sind -2 bis 2; Stärke 0 deaktiviert eine Datei. Änderungen nach dem Speichern gelten für nachfolgende Aufträge. `/loras` zeigt in Discord die Dateien und ihre Stärken. Qwen Image 2.1 verwendet weiterhin seinen bisherigen Workflow.
+
+Die Einstellungen werden in der SQLite-Datenbank unter `data/` gespeichert. Beim Serverumzug `data/` und `models/loras/` übernehmen. Das Setup erstellt den Ordner, lädt aber keine LoRA-Dateien herunter. Die automatische Erkennung prüft nicht, ob eine Datei zum Modell passt. Details zur Installation und zur Übernahme bisher fest eingetragener LoRAs stehen in [docs/automatic-loras.md](docs/automatic-loras.md).
+
 ## Bestehende Installation auf einen anderen Server umziehen
 
 Für eine neue, leere Installation reicht nach der Vorbereitung der Compose-Start. Für einen Umzug mit bestehenden Benutzern, Einstellungen und Bildern musst du zusätzlich die **ursprüngliche `.env`**, `data/`, `media-files/` und einen konsistenten Backup/Restore der PostgreSQL-Datenbank übernehmen. ComfyUI-Ausgaben liegen zusätzlich unter `comfy-output/`; vorhandene Modelle kannst du ebenfalls kopieren, um Downloads zu sparen.

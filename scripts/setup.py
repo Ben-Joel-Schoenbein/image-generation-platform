@@ -381,6 +381,7 @@ def main():
     print("Prüfe Docker-GPU-Zugriff mit dem verwendeten PyTorch-Image …", flush=True)
     run(docker + ["run", "--rm", "--gpus", "all", "--entrypoint", "python", image, "-c", "import torch; assert torch.cuda.is_available(), 'CUDA unavailable'; print(torch.cuda.get_device_name(0))"])
     download_files(root, manifest)
+    safe_path(root, "models/loras").mkdir(parents=True, exist_ok=True)
     install_prompts(root)
     save_configuration(root, before, after, credentials)
     if not args.no_build:

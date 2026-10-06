@@ -151,6 +151,40 @@ async def edit(interaction: discord.Interaction, prompt: str, reference: discord
         if image is not None], quality=quality, enhance_prompt=(enhance_prompt if enhance_prompt is not None else model == "qwen21"), seed=seed, edit_intent="recreate" if recreate else "edit", model=model, rapid_steps=rapid_steps, prompt_expansion=prompt_expansion)
 
 
+@bot.tree.command(name="loras", description="Show detected Rapid AIO LoRAs and their configured strengths")
+@app_commands.guild_only()
+@app_commands.allowed_installs(guilds=True, users=False)
+async def list_loras(interaction: discord.Interaction):
+    if not await allowed(interaction):
+        return
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    endpoint = API_URL.rstrip("/").rsplit("/", 1)[0] + "/loras"
+    try:
+        async with bot.api_session.get(endpoint, headers={"Authorization": "Bearer " + API_SECRET}) as response:
+            data = await response.json()
+            if response.status != 200:
+                raise RuntimeError(data.get("error", "LoRA discovery failed"))
+        lines = ["**Rapid AIO LoRAs**", "Automatic LoRAs: " + ("enabled" if data["enabled"] else "disabled"),
+                 f"Default strength for new files: {data['default_strength']:g}"]
+        items = data.get("items", [])
+        omitted = 0
+        for index, item in enumerate(items):
+            name = discord.utils.escape_mentions(discord.utils.escape_markdown(item["name"]))
+            line = f"• {name}: {item['strength']:g} ({'active' if item['active'] else 'disabled'})"
+            if len("\n".join(lines)) + len(line) > 1600:
+                omitted = len(items) - index
+                break
+            lines.append(line)
+        if omitted:
+            lines.append(f"… {omitted} more files; view the complete list on the website.")
+        if not items:
+            lines.append("No LoRA files found in models/loras.")
+        lines.append("The website administrator can change strengths under Admin → LoRAs. Settings apply to /imagine and /edit with Rapid AIO.")
+        await interaction.followup.send("\n".join(lines), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError, RuntimeError) as exc:
+        await interaction.followup.send("LoRA service error: " + str(exc)[:500], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+
 @bot.event
 async def on_ready():
     await bot.remove_legacy_guild_commands()

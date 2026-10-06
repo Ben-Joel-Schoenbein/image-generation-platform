@@ -175,6 +175,14 @@ The script saves comparison images, elapsed times, and settings. Add `--referenc
 
 In Discord select **Qwen Rapid AIO v23 — NSFW** via `model`. Restarting the bot synchronizes the choices; reload Discord with Ctrl+R and start a fresh command if the previous choices persist. The author suggests v23 may follow prompts better, while v19 can be more consistent for editing; compare your own references before changing your preferred version. See the [author's model card](https://huggingface.co/Phr00t/Qwen-Image-Edit-Rapid-AIO).
 
+## Automatic Rapid AIO LoRAs
+
+Place compatible LoRA files in `models/loras/`; subfolders are supported. The setup creates this directory. The web backend reads ComfyUI's file list for every Rapid AIO generation, so new files are automatically enabled on the next job with strength **0.6**. Website and Discord use the same settings for v19 NSFW and v23 NSFW.
+
+Sign in as an administrator and open **LoRAs** (`/admin/loras`) to set the default strength for new files, each file's strength, or disable files individually or globally. The allowed range is -2 to 2; strength 0 disables a file. Save to apply changes to subsequent jobs. `/loras` in Discord shows the recognized files and their current strengths. Qwen Image 2.1 keeps its existing workflow.
+
+LoRA settings are stored in the SQLite database under `data/`. Copy `data/` and `models/loras/` when moving an existing installation. The setup creates the folder but does not download LoRA weights. Filename discovery does not verify model compatibility. See [automatic LoRA setup and migration](docs/automatic-loras.md).
+
 ## Optional Discord bot
 
 1. Create an application in the [Discord Developer Portal](https://discord.com/developers/applications), add a bot, and copy its token into `.env` as `DISCORD_TOKEN`.
